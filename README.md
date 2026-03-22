@@ -1,5 +1,5 @@
 # OfflineTweaker
-### Offline AI Coding Powerhouse (exceeds Replit Pro/Base44)
+## Offline AI Coding Powerhouse (exceeds Replit Pro/Base44)
 
 Models: Qwen2.5-Coder series (best open coder models 2026)
 Agent modes:
