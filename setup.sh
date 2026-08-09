@@ -6,6 +6,13 @@ echo "🚀 Setting up offline AI coding toolchain (Ollama + code-server + Contin
 mkdir -p ./workspace ./ollama-data ./webui-data ./continue-config
 
 # Create docker-compose.yml
+# Ports bind to 127.0.0.1 only, on purpose: none of these services have
+# real auth (open-webui and ollama have none at all; code-server's PASSWORD
+# is the only gate). That's fine on a personal machine, but this compose
+# file is also meant to run unmodified on a rented cloud VM, where binding
+# to 0.0.0.0 would put an unauthenticated LLM API on the public internet.
+# To reach a cloud VM's services from elsewhere, use cloud/agent-loop.sh
+# (SSH tunnel) or Tailscale rather than widening these bindings.
 cat > docker-compose.yml << 'EOF'
 version: '3.8'
 services:
@@ -13,7 +20,7 @@ services:
     image: ollama/ollama:latest
     container_name: ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ./ollama-data:/root/.ollama
     restart: unless-stopped
@@ -30,7 +37,7 @@ services:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"
     volumes:
       - ./webui-data:/app/backend/data
     environment:
@@ -43,7 +50,7 @@ services:
     image: codercom/code-server:latest
     container_name: code-server
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./workspace:/home/coder/workspace
       - ./continue-config:/home/coder/.continue
@@ -119,8 +126,10 @@ echo "4. Open http://localhost:8080 (code-server, password above)"
 echo "5. In code-server terminal: cd /home/coder/workspace && python setup_venv.py"
 echo "6. Install Continue extension from VS Code marketplace (one-time)"
 echo "7. Open WebUI chat: http://localhost:3000"
+echo "8. Running this on a rented cloud VM instead? Services are bound to"
+echo "   127.0.0.1 only — connect from your phone/laptop with"
+echo "   cloud/agent-loop.sh (SSH tunnel) rather than opening these ports."
 echo "All set for offline mobile dev! 🎉"
-EOF
 
 chmod +x setup.sh
 echo "✅ Run ./setup.sh to finish setup (already done if you see this)"
