@@ -418,7 +418,275 @@ echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher...
 # device, since this sandbox can't simulate whether aider-chat's own
 # pinned numpy version actually *builds* from source on 3.13 (no wheel for
 # it exists yet), only that pip agrees to try.
-pip install --ignore-requires-python "aider-chat>=0.85"
+#
+# hf-xet: aider-chat 0.86.2's own metadata (confirmed live against
+# https://pypi.org/pypi/aider-chat/0.86.2/json, requires_dist) pins
+# `hf-xet==1.2.0` bare -- no environment marker, so pip must satisfy it on
+# every platform, not just the x86_64/manylinux ones it presumably got
+# tested on. hf-xet only ships wheels tagged manylinux/musllinux aarch64
+# (and other desktop platforms) -- confirmed against
+# https://pypi.org/pypi/hf-xet/1.2.0/json -- nothing matches Termux's
+# platform tag, so pip falls back to the sdist. That sdist is broken:
+# confirmed by downloading it directly from the URL in the same JSON and
+# extracting it -- its pyproject.toml sets `[tool.maturin] python-source =
+# "hf_xet/python"`, but that directory in the tarball contains only a
+# `.gitkeep`, no actual `hf_xet` module. This fails identically on *any*
+# platform forced to build from source, not just Termux -- confirmed by
+# reproducing the exact same "Preparing metadata (pyproject.toml) ...
+# error" / "python-source is set to ... does not exist" failure in a
+# throwaway x86_64 venv via `pip install --no-binary=hf-xet hf-xet==1.2.0`.
+# Checked a handful of neighboring releases the same way (download sdist,
+# inspect python-source target): 1.1.10 and 1.2.1 have the identical
+# missing-module defect; something changed by 1.3.0 -- its pyproject.toml
+# drops the `python-source` key entirely (different maturin layout) -- so
+# this looks like it was a real, if narrow, upstream regression window
+# rather than an always-broken package. That's moot for us either way:
+# aider-chat's pin is an exact `==1.2.0`, so pip won't consider 1.3.0+
+# regardless of whether they're fixed.
+#
+# aider-chat itself never imports hf_xet or huggingface_hub's xet code
+# path at all -- confirmed by extracting aider-chat's own sdist and
+# grepping it for "hf_xet"/"hf-xet"; the only hit is the PKG-INFO
+# dependency declaration, nothing in its actual source. huggingface_hub
+# (pinned to 1.4.1 by aider-chat, also confirmed via the same PyPI JSON)
+# is the thing that would use it, and is designed to degrade gracefully
+# when hf_xet isn't installed -- confirmed by downloading huggingface_hub
+# 1.4.1's own sdist and reading its source directly, not assuming: every
+# call site (file_download.py, _commit_api.py) gates on
+# utils._runtime.is_xet_available(), which is just an
+# importlib.metadata-backed "is a package named hf_xet installed" check
+# (_get_version() returns "N/A", caught, no exception) -- never a bare
+# `import hf_xet`. The one unconditional `from hf_xet import ...` in that
+# codebase lives in utils/_xet_progress_reporting.py, but that module is
+# only ever imported lazily from inside _upload_xet_files(), which is
+# itself only reached after is_xet_available() already gated "xet" out of
+# the offered upload transfers -- so it's never actually imported when
+# hf_xet is absent. file_download.py's downloader (the path aider-chat
+# actually exercises, for tokenizer/model file lookups) checks the same
+# flag and falls back to its normal http_get() with just a logger.warning,
+# confirmed by reading that branch directly. Net effect, confirmed from
+# source, not assumed: simply never installing hf_xet is safe, so long as
+# it's genuinely absent -- NOT stubbed. A fake local hf_xet package would
+# be actively worse than not installing it at all: is_xet_available() only
+# checks that *a distribution named hf_xet is installed*, not that it
+# works, so a stub would flip that check to True and then hit a real,
+# confusing ImportError deep inside xet_get() on the first tokenizer
+# download -- an install-time failure trading for a much worse silent
+# runtime one. So the goal below is specifically "pip completes without
+# hf_xet ending up installed at all", not "satisfy the requirement somehow".
+#
+# The obvious-looking fix -- resolve normally with `--dry-run --report`,
+# then reinstall everything from that report except hf-xet -- does NOT
+# work, confirmed by trying it in a throwaway venv: pip needs hf-xet's
+# metadata to even finish resolving the graph "aider-chat>=0.85" pulls in,
+# and *producing* metadata is exactly the step that's broken, dry run or
+# not -- `pip install --dry-run --report r.json --no-binary=hf-xet
+# "aider-chat>=0.85"` reproduces the identical maturin failure before ever
+# writing a report. Checked pip's own docs/source for a native "resolve
+# but skip this one dependency" flag too (the obvious next thing to try):
+# doesn't exist -- pip 26.2.1's `install`/`download`/`wheel` --help have no
+# such option, and the only `--exclude` flag anywhere in pip's source
+# (checked cli/cmdoptions.py) belongs to `freeze`/`list`/`index`, for
+# filtering command *output*, unrelated to dependency resolution.
+#
+# What actually works, confirmed end-to-end in a throwaway venv against
+# the real aider-chat 0.86.2 / huggingface-hub 1.4.1 dependency graph
+# (~108 packages): give pip a resolution-only decoy so it never needs
+# hf-xet's real (broken) metadata in the first place, then do the actual
+# install from an explicit pinned list that leaves hf-xet out entirely.
+#   1. Ask pip (via --no-deps --dry-run --report) what exact version of
+#      aider-chat it would pick, and pull the exact "hf-xet==X" pin out of
+#      *that* package's own metadata. This step never touches hf-xet's
+#      metadata at all -- --no-deps means pip only has to look at
+#      aider-chat's own (working) metadata -- confirmed by running it.
+#   2. Build a trivial local wheel -- hand-built with Python's stdlib
+#      zipfile, no `wheel`/`build` package needed -- that just claims to
+#      *be* hf-xet==X (real METADATA/WHEEL files, zero actual code inside).
+#      Point pip at it with --find-links for the next step only. This
+#      wheel is never installed into the real environment; see below.
+#   3. Re-resolve the *full* "aider-chat==X" graph for real (no --no-deps
+#      this time), with that --find-links dir available. Confirmed by
+#      reading pip's own candidate-ranking code
+#      (_internal/index/package_finder.py, PackageFinder._sort_key): a
+#      matching wheel always outranks an sdist for the same version,
+#      unconditionally, not just with --prefer-binary -- so wherever pip
+#      would otherwise have had to fall back to hf-xet's broken sdist (no
+#      matching real wheel for the platform), it picks our harmless local
+#      stub instead and never invokes maturin on the real package at all.
+#      Confirmed live (not just from reading the ranking code): simulating
+#      "no real wheel available for this platform" with
+#      --platform/--only-binary=:all: against the same stub reproduces
+#      exactly this -- pip installs the stub with zero build attempted.
+#      Genuinely unverified: watching this actual selection happen on a
+#      real Termux/aarch64 run -- this sandbox is x86_64, where hf-xet
+#      *does* publish a real wheel, so here pip picks PyPI's real one
+#      over the stub (a more specific tag wins the tie-break) and the stub
+#      sits unused -- which is fine, since step 4 excludes hf-xet by name
+#      regardless of which one "won" here.
+#   4. Take that resolution's --report JSON, drop the hf-xet entry (by
+#      normalized name, so hf-xet/hf_xet/HF-Xet all match), and do the
+#      real install from the rest as an explicit `name==version` list with
+#      --no-deps. --no-deps here is what actually matters: it stops pip
+#      from ever re-reading aider-chat's (or huggingface-hub's own
+#      platform_machine-conditional hf-xet range's) metadata during this
+#      pass, so the poisoned requirement is never seen a second time.
+# Confirmed end-to-end in that throwaway venv: the final environment has
+# aider-chat installed and working (`aider --version` succeeds), hf-xet
+# genuinely absent (importlib.metadata can't find it), and
+# huggingface_hub.utils.is_xet_available() correctly returns False. Could
+# not confirm the resulting graceful-download-fallback fires on a real
+# huggingface.co request in this sandbox specifically -- outbound access
+# to huggingface.co (as opposed to pypi.org, which this whole
+# investigation otherwise relied on) is blocked by this environment's
+# proxy, unrelated to this fix.
+AIDER_TMPDIR="$(mktemp -d)"
+# set -e means a failure partway through this block (a real pip error, not
+# the hf-xet workaround) skips straight past the cleanup at the bottom --
+# trap guarantees $AIDER_TMPDIR is removed on any exit path, same pattern
+# already used for the SSH tunnel in cloud/agent-loop.sh.
+trap 'rm -rf "$AIDER_TMPDIR"' EXIT
+
+cat > "$AIDER_TMPDIR/find_hfxet_pin.py" << 'PYEOF'
+# Reads a --no-deps --report for aider-chat alone and prints the exact
+# version from its own bare (unconditional, unmarked) "hf-xet==X" pin, if
+# any. Prints nothing if aider-chat no longer pins it that way -- callers
+# treat that as "nothing to work around", not an error, so a future
+# aider-chat release that drops or relaxes this pin degrades gracefully
+# back to a plain install instead of this script assuming a stale pin.
+import json
+import re
+import sys
+
+with open(sys.argv[1]) as f:
+    report = json.load(f)
+
+pin = ""
+for item in report["install"]:
+    meta = item["metadata"]
+    for req in meta.get("requires_dist") or []:
+        m = re.match(r"^\s*hf[-_.]?xet\s*==\s*([^\s;]+)\s*$", req, re.IGNORECASE)
+        if m:
+            pin = m.group(1)
+print(pin)
+PYEOF
+
+cat > "$AIDER_TMPDIR/build_stub_wheel.py" << 'PYEOF'
+# Hand-builds a minimal, valid wheel for the given name/version using only
+# stdlib zipfile -- no `wheel`/`build` package needed as a bootstrap dep.
+# Contains real METADATA/WHEEL/RECORD files and zero actual code: it only
+# ever needs to satisfy pip's dependency *resolution*, never to be
+# imported. See the big comment above this block for why it must never
+# end up in the real installed environment.
+import sys
+import zipfile
+
+name, version, out_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+dist_info = f"{name}-{version}.dist-info"
+whl_path = f"{out_dir}/{name}-{version}-py3-none-any.whl"
+
+metadata = (
+    f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+    "Summary: OfflineTweaker resolution-only placeholder -- never actually "
+    "installed or imported. See android/termux-setup.sh.\n"
+)
+wheel = (
+    "Wheel-Version: 1.0\nGenerator: offlinetweaker-termux-setup\n"
+    "Root-Is-Purelib: true\nTag: py3-none-any\n"
+)
+
+with zipfile.ZipFile(whl_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr(f"{dist_info}/METADATA", metadata)
+    zf.writestr(f"{dist_info}/WHEEL", wheel)
+    zf.writestr(f"{dist_info}/RECORD", "")
+print(whl_path)
+PYEOF
+
+cat > "$AIDER_TMPDIR/filter_report.py" << 'PYEOF'
+# Reads a full --report for aider-chat, writes every resolved package as
+# an explicit "name==version" pin EXCEPT hf-xet (matched by normalized
+# name, so hf-xet/hf_xet/HF.Xet all count), for a follow-up --no-deps
+# install. See the big comment above this block for why hf-xet must be
+# excluded rather than satisfied.
+import json
+import re
+import sys
+
+report_path, out_path = sys.argv[1], sys.argv[2]
+with open(report_path) as f:
+    report = json.load(f)
+
+skipped = []
+with open(out_path, "w") as out:
+    for item in report["install"]:
+        meta = item["metadata"]
+        name, version = meta["name"], meta["version"]
+        if re.sub(r"[-_.]+", "-", name).lower() == "hf-xet":
+            skipped.append(f"{name}=={version}")
+            continue
+        out.write(f"{name}=={version}\n")
+
+if skipped:
+    print("Excluding from install (broken upstream sdist): " + ", ".join(skipped))
+else:
+    print(
+        "NOTE: hf-xet wasn't in the resolved graph at all -- the stub wheel "
+        "may not have been needed this run.",
+        file=sys.stderr,
+    )
+PYEOF
+
+echo "Checking aider-chat's own pinned hf-xet version..."
+# --force-reinstall is load-bearing here, confirmed by hitting the bug it
+# fixes: on a *second* run (aider-chat already installed and satisfying
+# ">=0.85"), a plain `--no-deps --dry-run --report` produces an install
+# list -- and therefore a metadata section to inspect -- for every package
+# that still needs (re)installing, which on a clean re-run is none. An
+# empty report here would silently look identical to "aider-chat no longer
+# pins hf-xet" and fall through to the plain-install branch below, which
+# runs a normal (non-excluded) resolution and would try to satisfy hf-xet
+# for real again -- reintroducing the exact broken-sdist failure this
+# whole block exists to avoid. --force-reinstall makes pip always report
+# aider-chat's real metadata regardless of what's already installed, while
+# --dry-run still guarantees nothing is actually touched -- confirmed by
+# running this exact combination twice in a throwaway venv and checking
+# `pip show aider-chat` was byte-for-byte unchanged after.
+pip install --ignore-requires-python --no-deps --dry-run --force-reinstall \
+  --report "$AIDER_TMPDIR/aider_only_report.json" "aider-chat>=0.85"
+HFXET_PIN="$(python3 "$AIDER_TMPDIR/find_hfxet_pin.py" "$AIDER_TMPDIR/aider_only_report.json")"
+
+if [ -z "$HFXET_PIN" ]; then
+  echo "No unconditional hf-xet pin found in aider-chat's metadata -- the"
+  echo "known-broken-sdist workaround doesn't apply this run, installing normally."
+  pip install --ignore-requires-python "aider-chat>=0.85"
+else
+  echo "aider-chat pins hf-xet==$HFXET_PIN, whose sdist is broken upstream (see"
+  echo "comment above) -- resolving with a throwaway local stub so pip never"
+  echo "needs hf-xet's real metadata, then installing everything else for real."
+  AIDER_VERSION="$(python3 -c "
+import json
+with open('$AIDER_TMPDIR/aider_only_report.json') as f:
+    print(json.load(f)['install'][0]['metadata']['version'])
+")"
+  mkdir -p "$AIDER_TMPDIR/stub"
+  python3 "$AIDER_TMPDIR/build_stub_wheel.py" hf_xet "$HFXET_PIN" "$AIDER_TMPDIR/stub"
+  # Deliberately NOT --force-reinstall here, unlike the detection step
+  # above: this report is the actual install plan, and letting pip skip
+  # packages already satisfied from a previous (maybe partial) run is what
+  # makes re-running this script cheap and resumable -- a clean re-run
+  # naturally reports zero installs and the pip call below becomes a
+  # no-op, same idea as the resumable model download further up.
+  pip install --ignore-requires-python --dry-run \
+    --report "$AIDER_TMPDIR/full_report.json" \
+    --find-links "$AIDER_TMPDIR/stub" \
+    "aider-chat==$AIDER_VERSION"
+  python3 "$AIDER_TMPDIR/filter_report.py" \
+    "$AIDER_TMPDIR/full_report.json" "$AIDER_TMPDIR/pinned_specs.txt"
+  pip install --ignore-requires-python --no-deps -r "$AIDER_TMPDIR/pinned_specs.txt"
+fi
+# No explicit rm here -- the trap above already handles normal completion,
+# and (more importantly) also covers a pip failure partway through either
+# branch above, which set -e would otherwise abort past before reaching
+# any cleanup placed here.
 
 cat > "$HOME/aider-local.sh" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
