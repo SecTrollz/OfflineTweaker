@@ -194,7 +194,82 @@ pkg update -y
 # against Android's libc/linker (bionic) once a real compile is attempted --
 # that's a different question than "does a toolchain exist", and neither
 # this sandbox nor rustup's target list can answer it.
-pkg install -y git cmake golang clang make curl python rust
+#
+# `python-psutil` is here for a different reason than `rust` above: not a
+# missing toolchain, but psutil's *own* build script deliberately refusing
+# to build on Android at all. Confirmed from a real device: pip installing
+# aider-chat 0.86.2 (its own bare, unconditional `psutil==7.2.2` pin --
+# confirmed via pypi.org/pypi/aider-chat/0.86.2/json, requires_dist, same
+# way the hf-xet pin was confirmed) fails getting build requirements for
+# psutil with a one-line error: "platform android is not supported". That
+# comes straight from psutil's own setup.py (confirmed by downloading the
+# psutil-7.2.2 sdist directly from PyPI and reading it): it dispatches on
+# LINUX/WINDOWS/MACOS/etc. constants from psutil/_common.py, where
+# `LINUX = sys.platform.startswith("linux")`, and falls through to
+# `sys.exit("platform {} is not supported".format(sys.platform))` if none
+# match -- there's no ANDROID case and no generic fallback. The reason that
+# branch is taken at all: CPython's own configure.ac (confirmed at
+# github.com/python/cpython, tag v3.13.0) sets `MACHDEP="android"` for the
+# `*-*-linux-android*` host triple, which becomes `sys.platform` at
+# runtime -- so a CPython actually built to run *on* Android (Termux's
+# on-device python, not a build-farm host python) reports "android", not
+# "linux", and literally cannot take psutil's LINUX branch. This is a
+# dispatch gap in psutil's own build script, not a toolchain problem
+# rustc/cargo could fix and not a broken sdist like hf-xet -- there is no
+# way to make a stock upstream psutil sdist build under Termux's current
+# Python by adding anything to this line, or any line.
+# Termux's own `python-psutil` package sidesteps this without needing to
+# patch psutil: confirmed at
+# raw.githubusercontent.com/termux/termux-packages/master/packages/python-psutil/build.sh
+# (current as of writing; confirmed via a full listing of termux-packages'
+# packages/ directory that this is the only psutil-related package name --
+# no alias/rename to worry about), it pins TERMUX_PKG_VERSION="7.2.2" --
+# an exact match to aider-chat's pin, unlike the hf-xet case where no
+# working version existed at any pin. Its build never hits the branch
+# above: termux-packages cross-compiles python packages using a *separate*
+# host-side CPython built specifically to drive cross-compilation (see
+# scripts/build/setup/termux_setup_build_python.sh in that same repo), and
+# that host python is built for the CI machine's own triple, not
+# `*-linux-android*` -- so it reports sys.platform=="linux", takes psutil's
+# normal LINUX branch, and cross-compiles psutil/_psutil_linux.c for real
+# against the aarch64-linux-android target via CC/LDFLAGS overrides. The
+# check only ever fires on-device, which this package's build never runs
+# on.
+# Mechanism confirmed, not assumed, that this then makes the later
+# multi-phase aider-chat install (step [6/6] below) skip building psutil
+# itself: termux-packages' generic install step for any package with a
+# setup.py/pyproject.toml and no more specific override -- psutil's case --
+# is a plain `pip install --no-deps . --prefix $TERMUX_PREFIX` (confirmed
+# in scripts/build/termux_step_make_install.sh), landing real
+# dist-info/METADATA/RECORD files under
+# $TERMUX_PREFIX/lib/python*/site-packages -- the same site-packages
+# Termux's on-device pip/python already use, not some separate
+# Termux-only registration format. Confirmed independently: that repo's
+# own postinst-generation logic (scripts/build/termux_step_create_python_debscripts.sh)
+# explicitly locates and reads a METADATA file at that same path, so this
+# isn't just inferred from convention. Reproduced the actual pip-facing
+# behavior this depends on in a throwaway venv in this sandbox: hand-planted
+# a METADATA/RECORD pair for psutil==7.2.2 into site-packages (no wheel or
+# sdist involved at all), then ran a plain `pip install psutil==7.2.2`
+# against it -- pip printed "Requirement already satisfied: psutil==7.2.2"
+# and never touched PyPI. Because aider-chat's pin (==7.2.2) and Termux's
+# package version (7.2.2) match exactly, this script's step [6/6] pinned-list
+# install (`pip install --no-deps -r pinned_specs.txt`, part of the hf-xet
+# workaround below) should see psutil the same way and skip it -- psutil's
+# setup.py is never invoked on-device at all. That step [6/6] flow installs
+# straight into Termux's global site-packages, not an isolated venv --
+# confirmed by reading this script, there's no `python -m venv` call in it
+# -- so there's no separate-environment-invisibility concern between what
+# `pkg` installs here and what pip sees later.
+# Genuinely unverified without a real device: whether the live Termux apt
+# repo's currently-published python-psutil .deb (TERMUX_PKG_REVISION=2 as
+# of writing) actually matches what's checked into the git repo above at
+# any given moment (ordinary mirror-lag risk, no different from any other
+# package on this line) -- and whether `pip`'s own already-satisfied check
+# (pip's internal metadata scanner, not stdlib importlib.metadata, though
+# both should agree here) behaves identically on Termux's actual pip
+# version as it did against pip 24.0 in this sandbox's throwaway venv.
+pkg install -y git cmake golang clang make curl python rust python-psutil
 
 echo "[3/6] Building llama.cpp (native, CPU-only)..."
 if [ ! -d "$LLAMA_DIR" ]; then
