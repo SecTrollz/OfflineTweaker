@@ -1,4 +1,6 @@
-# OfflineTweaker
+# WORLD DOMINATION PLAN NO.63
+
+## OfflineTweaker
 ## Desktop (Docker)
 Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
 Agent modes:
