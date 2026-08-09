@@ -267,9 +267,31 @@ else
   # Download to a temp path and verify *before* anything ever lands at
   # MODEL_PATH -- an unverified or tampered file should never be
   # observable at the canonical path, even briefly.
-  rm -f "$TMP_PATH"
+  #
+  # This is a multi-GB download over what might be a phone's cellular or
+  # flaky wifi connection -- assume it can get interrupted (dropped
+  # connection, Termux backgrounded and killed, phone locked mid-transfer)
+  # partway through. -C - tells curl to resume from wherever $TMP_PATH
+  # already left off instead of starting over from byte zero; if the file
+  # doesn't exist yet (or is empty), curl transparently falls back to a
+  # normal full download, so this is always the right flag to pass, not
+  # just on a retry. If the final assembled file turns out wrong for any
+  # reason (partial from a stale/replaced upstream file, disk corruption
+  # in the already-downloaded portion, etc.), verify_checksum below still
+  # catches it the same way it would a fresh download -- resuming never
+  # weakens that guarantee, it only avoids re-fetching bytes that were
+  # already there. Confirmed this matters, not just in theory: if
+  # $TMP_PATH is somehow already *larger* than the real remote file (a
+  # genuinely corrupted local state), the server correctly answers 416 and
+  # curl -C - exits 0 without changing the file at all -- silently, no
+  # error -- rather than detecting the mismatch itself. verify_checksum is
+  # what actually catches that case, not curl's exit code.
+  if [ -f "$TMP_PATH" ]; then
+    have_bytes="$(wc -c < "$TMP_PATH" 2>/dev/null || echo 0)"
+    echo "Found a partial download from a previous run ($have_bytes bytes) -- resuming instead of starting over."
+  fi
   EXPECTED_SHA256="$(fetch_expected_sha256)"
-  curl -L --fail -o "$TMP_PATH" "$MODEL_URL"
+  curl -L --fail -C - -o "$TMP_PATH" "$MODEL_URL"
   verify_checksum "$TMP_PATH" "$EXPECTED_SHA256"
   mv -f "$TMP_PATH" "$MODEL_PATH"
   lock_model_file
