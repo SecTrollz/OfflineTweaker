@@ -38,7 +38,7 @@ Termux + native llama.cpp.
 device's name:
 
 ```bash
-git clone https://GitHub.com/SecTrollz/Offline Tweaker.git
+git clone https://GitHub.com/SecTrollz/OfflineTweaker.git
 cd OfflineTweaker
 chmod +x setup.sh
 ./setup.sh
