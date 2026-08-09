@@ -1,8 +1,11 @@
 # OfflineTweaker
 ## Offline AI Coding Powerhouse (exceeds Replit Pro/Base44)
 
-Models: Qwen2.5-Coder series (best open coder models 2026)
+Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
 Agent modes:
+- **Autonomous build loop** (`agent/build-loop.sh`): give it a task, it
+  writes code, runs your tests, reads the failures, and fixes it itself —
+  see [Autonomous Build Loop](#autonomous-build-loop) below.
 - Continue.dev in VS Code: /edit, /run, codebase chat, autonomous refactoring
 - Aider: `aider --model ollama/qwen2.5-coder:14b` in terminal
 - Jupyter notebooks for scripts/REPL
@@ -47,3 +50,37 @@ Notes:
 - `termux-wake-lock` prevents Android from suspending inference mid-response.
 - Both models are DeepSeek-R1 reasoning distills, so expect `<think>` traces
   in output — trim them client-side if you just want the final answer.
+
+## Autonomous Build Loop
+
+This is the piece that makes it a *builder* rather than a chat window, the
+same idea behind Replit Agent / Emergent: hand it a task, it writes code,
+**runs your tests, reads the failures, and fixes it itself** — repeating
+until the tests pass or it runs out of attempts. Fully offline, on top of
+whichever local model you're already running.
+
+```bash
+# Desktop, against the Ollama server from setup.sh:
+./agent/build-loop.sh --dir ./workspace/my-app \
+  --task "Add a /health endpoint that returns 200 OK" \
+  --model qwen2.5-coder:14b --api-base http://localhost:11434/v1 \
+  --test-cmd "pytest -q"
+
+# Android, against the on-device model (run-model.sh must already be running):
+cd android
+./agent-loop.sh pixel9a --dir ~/projects/my-app \
+  --task "Fix the failing tests" --test-cmd "python -m pytest -q"
+```
+
+How it works:
+1. Aider gets the task and edits the project in `--dir`.
+2. Your `--test-cmd` runs against the result.
+3. On failure, the last ~4000 chars of test output are fed back to the
+   model as the next instruction ("fix the code so this passes").
+4. Repeats up to `--max-iters` (default 5).
+5. Every iteration's transcript and test output is logged under
+   `<project-dir>/.offlinetweaker/agent-logs/<timestamp>/` so you can see
+   exactly what it tried, even on failure.
+
+Omit `--test-cmd` for a single-pass edit with no verification loop (useful
+for tasks with no obvious pass/fail check, like "add a README").
