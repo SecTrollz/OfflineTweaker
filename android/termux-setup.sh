@@ -328,7 +328,21 @@ EOF
 
 echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher..."
 pip install --upgrade pip >/dev/null
-pip install aider-chat
+# A bare `pip install aider-chat` can backtrack much further than you'd
+# expect: if pip can't fully resolve the *latest* release's dependency
+# tree in this environment, it keeps trying older and older releases
+# looking for anything installable, and can land on one from aider-chat's
+# early days that hard-pins exact old dependency versions (e.g.
+# numpy==1.24.3). That specific numpy is unbuildable on Python 3.12+ --
+# not slow, not flaky, unconditionally broken -- because it still depends
+# on numpy.distutils, which needs the stdlib `distutils` module that
+# Python removed in 3.12. Termux ships new Python (3.13+ as of writing),
+# so this is exactly the trap. A floor version keeps pip on aider-chat's
+# modern dependency set (numpy>=1.26, which moved to the meson build
+# system specifically because of the distutils removal) instead of ever
+# considering those ancient pins. Bump the floor occasionally; the point
+# isn't this exact number, it's staying well clear of the old-pins era.
+pip install "aider-chat>=0.85"
 
 cat > "$HOME/aider-local.sh" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
