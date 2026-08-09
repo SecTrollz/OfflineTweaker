@@ -26,8 +26,11 @@ termux-wake-lock
 ~/run-model.sh
 ```
 
-Then open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or point
-any OpenAI-compatible client at that address.
+Then either:
+- open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or
+- in a second Termux session, run `~/aider-local.sh` inside a project
+  directory for an agentic coding CLI (reads/edits files, runs commands)
+  backed by the same local model — no cloud API key needed.
 
 Model picked per device, sized to fit in RAM:
 
