@@ -73,14 +73,39 @@ cd android
 ```
 
 How it works:
-1. Aider gets the task and edits the project in `--dir`.
-2. Your `--test-cmd` runs against the result.
-3. On failure, the last ~4000 chars of test output are fed back to the
-   model as the next instruction ("fix the code so this passes").
-4. Repeats up to `--max-iters` (default 5).
-5. Every iteration's transcript and test output is logged under
+1. Every run gets a short built-in system preamble telling the model to
+   stay terse — make the minimal change, don't restate unchanged code, keep
+   reasoning brief. Override it with the `OFFLINETWEAKER_SYSTEM_PROMPT` env
+   var if you want different behavior.
+2. Aider gets the task (preamble + your `--task`) and edits the project in
+   `--dir`.
+3. Your `--test-cmd` runs against the result.
+4. On failure, the last `--max-feedback-chars` of test output (default
+   4000) are fed back to the model as the next instruction ("fix the code
+   so this passes").
+5. Repeats up to `--max-iters` (default 5).
+6. Every iteration's transcript and test output is logged under
    `<project-dir>/.offlinetweaker/agent-logs/<timestamp>/` so you can see
    exactly what it tried, even on failure.
 
 Omit `--test-cmd` for a single-pass edit with no verification loop (useful
 for tasks with no obvious pass/fail check, like "add a README").
+
+**Context budget matters on small local models.** A verbose response plus
+Aider's repo map plus a large failure dump can eat a small context window
+before the model even sees the code. Two flags tune that:
+- `--max-feedback-chars N` — how much test-failure output gets fed back on
+  retry.
+- `--map-tokens N` — forwarded to Aider's own repo-map budget.
+
+`android/agent-loop.sh` sets both automatically per device so the
+4096-token (pixel9a) and 2048-token (motog5g) context windows aren't blown
+by overhead before the actual fix gets written:
+
+| Profile  | Context | `--map-tokens` | `--max-feedback-chars` |
+|----------|---------|----------------|--------------------------|
+| pixel9a  | 4096    | 512            | 3000                     |
+| motog5g  | 2048    | 0 (disabled)   | 1200                     |
+
+Leave both unset on desktop (as in the example above) to use Aider's normal
+defaults — a full-size context window doesn't need the trim.

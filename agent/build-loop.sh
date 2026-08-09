@@ -15,7 +15,8 @@
 # Usage:
 #   build-loop.sh --dir <project-dir> --task "<what to build/fix>" \
 #                  --model <model-name> [--api-base <url>] [--api-key <key>] \
-#                  [--test-cmd "<command>"] [--max-iters N]
+#                  [--test-cmd "<command>"] [--max-iters N] \
+#                  [--max-feedback-chars N] [--map-tokens N]
 #
 # Examples:
 #   # Desktop, against Ollama:
@@ -25,10 +26,20 @@
 #     --test-cmd "pytest -q"
 #
 #   # Android, against the local llama-server (see android/agent-loop.sh
-#   # for a thin wrapper that fills in --model/--api-base for you):
+#   # for a thin wrapper that fills in --model/--api-base and the
+#   # context-budget flags below for you):
 #   ./agent/build-loop.sh --dir ~/projects/my-app \
 #     --task "Fix the failing tests" --model deepseek-r1-qwen-7b \
-#     --api-base http://127.0.0.1:8080/v1 --test-cmd "python -m pytest -q"
+#     --api-base http://127.0.0.1:8080/v1 --test-cmd "python -m pytest -q" \
+#     --map-tokens 512 --max-feedback-chars 3000
+#
+# Every run gets a short built-in system preamble (override via the
+# OFFLINETWEAKER_SYSTEM_PROMPT env var) that tells the model to stay terse —
+# this matters most on small local models with a tight context window.
+# --max-feedback-chars and --map-tokens are the two real context-budget
+# levers: how much failing-test output gets fed back on retry, and how many
+# tokens Aider spends on its repo map. Tune both down for small-context
+# models; leave them unset for a normal desktop-sized context window.
 
 set -u
 
@@ -39,9 +50,12 @@ MAX_ITERS=5
 API_BASE=""
 API_KEY="sk-local-no-key-required"
 MODEL=""
+MAX_FEEDBACK_CHARS=4000
+MAP_TOKENS=""
+SYSTEM_PREAMBLE="${OFFLINETWEAKER_SYSTEM_PROMPT:-You are a coding agent running on constrained local hardware with a small context window. Be terse: make the minimal correct change, avoid restating unchanged code, keep any reasoning brief, and address only the current task or test failure directly.}"
 
 usage() {
-  echo "Usage: $0 --dir <project-dir> --task \"<task>\" --model <model> [--api-base <url>] [--api-key <key>] [--test-cmd \"<cmd>\"] [--max-iters N]"
+  echo "Usage: $0 --dir <project-dir> --task \"<task>\" --model <model> [--api-base <url>] [--api-key <key>] [--test-cmd \"<cmd>\"] [--max-iters N] [--max-feedback-chars N] [--map-tokens N]"
   exit 1
 }
 
@@ -54,6 +68,8 @@ while [ $# -gt 0 ]; do
     --api-base) API_BASE="$2"; shift 2 ;;
     --api-key) API_KEY="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
+    --max-feedback-chars) MAX_FEEDBACK_CHARS="$2"; shift 2 ;;
+    --map-tokens) MAP_TOKENS="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unknown argument: $1"; usage ;;
   esac
@@ -107,14 +123,14 @@ for ((i = 1; i <= MAX_ITERS; i++)); do
     echo "--- aider output ---"
   } > "$iter_log"
 
-  if [ -n "$TEST_CMD" ]; then
-    aider --yes-always --no-stream --model "openai/$MODEL" \
-      --message "$current_task" --auto-test --test-cmd "$TEST_CMD" \
-      --auto-commits >> "$iter_log" 2>&1
-  else
-    aider --yes-always --no-stream --model "openai/$MODEL" \
-      --message "$current_task" --auto-commits >> "$iter_log" 2>&1
-  fi
+  aider_args=(--yes-always --no-stream --model "openai/$MODEL")
+  [ -n "$MAP_TOKENS" ] && aider_args+=(--map-tokens "$MAP_TOKENS")
+  [ -n "$TEST_CMD" ] && aider_args+=(--auto-test --test-cmd "$TEST_CMD")
+  aider_args+=(--message "$SYSTEM_PREAMBLE
+
+$current_task" --auto-commits)
+
+  aider "${aider_args[@]}" >> "$iter_log" 2>&1
 
   if [ -z "$TEST_CMD" ]; then
     echo "No --test-cmd given, treating this as a single-pass edit. See $iter_log."
@@ -130,7 +146,7 @@ for ((i = 1; i <= MAX_ITERS; i++)); do
   fi
 
   echo "Tests failed on iteration $i, feeding failure back for the next attempt..."
-  failure_output="$(tail -c 4000 "$test_log")"
+  failure_output="$(tail -c "$MAX_FEEDBACK_CHARS" "$test_log")"
   current_task="The previous attempt's tests failed with this output:
 
 $failure_output
