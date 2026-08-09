@@ -16,7 +16,8 @@
 #   build-loop.sh --dir <project-dir> --task "<what to build/fix>" \
 #                  --model <model-name> [--api-base <url>] [--api-key <key>] \
 #                  [--test-cmd "<command>"] [--max-iters N] \
-#                  [--max-feedback-chars N] [--map-tokens N]
+#                  [--max-feedback-chars N] [--map-tokens N] \
+#                  [--encrypt-logs <age-recipient-or-recipients-file>]
 #
 # Examples:
 #   # Desktop, against Ollama:
@@ -44,6 +45,22 @@
 # For a hosted-API key, prefer exporting OPENAI_API_KEY before running this
 # rather than --api-key -- a key passed on the command line ends up visible
 # to other users via `ps` and saved in shell history.
+#
+# --encrypt-logs encrypts every iteration log, test-output log, and Aider's
+# own chat-history file (the full task + model transcript) as they're
+# written, using age (https://age-encryption.org) -- and deletes the
+# plaintext. This is asymmetric (recipient-key) encryption, not a
+# passphrase, on purpose: a passphrase means a human re-typing it at every
+# one of potentially --max-iters * 2 file writes per run, which isn't
+# workable, so age's passphrase mode refuses to be scripted at all (it
+# reads /dev/tty directly). One-time setup:
+#   age-keygen -o ~/.offlinetweaker/logs-key.txt   # prints the public key
+# then pass that public key (or the key FILE path, either works) as the
+# --encrypt-logs value on every run. Decrypt later with:
+#   age -d -i ~/.offlinetweaker/logs-key.txt iteration-1.log.age
+# Protect ~/.offlinetweaker/logs-key.txt like the secret it is (age-keygen
+# already chmod 600s it) -- anyone who reads that file can decrypt every
+# log encrypted to it, past and future.
 
 set -u
 
@@ -61,10 +78,11 @@ API_KEY_FROM_ARG=0
 MODEL=""
 MAX_FEEDBACK_CHARS=4000
 MAP_TOKENS=""
+ENCRYPT_LOGS_TO=""
 SYSTEM_PREAMBLE="${OFFLINETWEAKER_SYSTEM_PROMPT:-You are a coding agent running on constrained local hardware with a small context window. Be terse: make the minimal correct change, avoid restating unchanged code, keep any reasoning brief, and address only the current task or test failure directly.}"
 
 usage() {
-  echo "Usage: $0 --dir <project-dir> --task \"<task>\" --model <model> [--api-base <url>] [--api-key <key>] [--test-cmd \"<cmd>\"] [--max-iters N] [--max-feedback-chars N] [--map-tokens N]"
+  echo "Usage: $0 --dir <project-dir> --task \"<task>\" --model <model> [--api-base <url>] [--api-key <key>] [--test-cmd \"<cmd>\"] [--max-iters N] [--max-feedback-chars N] [--map-tokens N] [--encrypt-logs <age-recipient-or-recipients-file>]"
   exit 1
 }
 
@@ -79,6 +97,7 @@ while [ $# -gt 0 ]; do
     --model) MODEL="$2"; shift 2 ;;
     --max-feedback-chars) MAX_FEEDBACK_CHARS="$2"; shift 2 ;;
     --map-tokens) MAP_TOKENS="$2"; shift 2 ;;
+    --encrypt-logs) ENCRYPT_LOGS_TO="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unknown argument: $1"; usage ;;
   esac
@@ -98,6 +117,36 @@ if ! command -v aider >/dev/null 2>&1; then
   exit 1
 fi
 
+AGE_ARGS=()
+if [ -n "$ENCRYPT_LOGS_TO" ]; then
+  if ! command -v age >/dev/null 2>&1; then
+    echo "ERROR: --encrypt-logs was given but 'age' is not installed/on PATH. Install it (apt/pkg/brew install age) or drop --encrypt-logs -- refusing to silently fall back to writing plaintext logs when encryption was explicitly requested." >&2
+    exit 1
+  fi
+  if [ -f "$ENCRYPT_LOGS_TO" ]; then
+    AGE_ARGS=(-R "$ENCRYPT_LOGS_TO")
+  else
+    AGE_ARGS=(-r "$ENCRYPT_LOGS_TO")
+  fi
+fi
+
+encrypt_log() {
+  # Encrypts $1 in place (age-encrypted "$1.age", plaintext removed) if
+  # --encrypt-logs was given; no-op otherwise. On encryption failure, the
+  # plaintext is left exactly where it was and this says so loudly --
+  # silently losing a log, or silently leaving it unencrypted after
+  # encryption was explicitly requested, are both worse than a visible
+  # failure the caller has to notice.
+  local f="$1"
+  [ -n "$ENCRYPT_LOGS_TO" ] || return 0
+  [ -f "$f" ] || return 0
+  if age "${AGE_ARGS[@]}" -o "$f.age" "$f" < /dev/null 2>"$f.encrypt-error"; then
+    rm -f "$f" "$f.encrypt-error"
+  else
+    echo "ERROR: failed to encrypt $f -- left as plaintext. See $f.encrypt-error." >&2
+  fi
+}
+
 if [ "$API_KEY_FROM_ARG" -eq 1 ]; then
   echo "WARNING: --api-key was passed on the command line -- it's visible to other users via 'ps' and gets saved in shell history. Prefer: export OPENAI_API_KEY=... and omit --api-key." >&2
 fi
@@ -113,6 +162,7 @@ echo "Project: $DIR"
 echo "Model:   $MODEL @ $API_BASE"
 echo "Test:    ${TEST_CMD:-<none — single pass, no verification loop>}"
 echo "Logs:    $LOG_ROOT"
+[ -n "$ENCRYPT_LOGS_TO" ] && echo "Encrypting logs to: $ENCRYPT_LOGS_TO"
 echo
 
 run_tests() {
@@ -139,14 +189,38 @@ for ((i = 1; i <= MAX_ITERS; i++)); do
   aider_args=(--yes-always --no-stream --model "openai/$MODEL")
   [ -n "$MAP_TOKENS" ] && aider_args+=(--map-tokens "$MAP_TOKENS")
   [ -n "$TEST_CMD" ] && aider_args+=(--auto-test --test-cmd "$TEST_CMD")
+  # Aider keeps its own full transcript (default .aider.chat.history.md in
+  # $DIR) independent of the log redirection above. When encrypting, pull
+  # it into LOG_ROOT instead of letting it land in the project dir in
+  # plaintext, so it goes through encrypt_log() like everything else below.
+  aider_chat_history=""
+  if [ -n "$ENCRYPT_LOGS_TO" ]; then
+    aider_chat_history="$LOG_ROOT/iteration-$i-aider-chat-history.md"
+    aider_args+=(--chat-history-file "$aider_chat_history")
+  fi
   aider_args+=(--message "$SYSTEM_PREAMBLE
 
 $current_task" --auto-commits)
 
   aider "${aider_args[@]}" >> "$iter_log" 2>&1
 
+  # Encrypt (or no-op if --encrypt-logs wasn't given) as soon as each file
+  # is done being written -- iter_log and the chat history are never read
+  # back by this script, so there's no reason to leave them in plaintext
+  # a moment longer than necessary.
+  encrypt_log "$iter_log"
+  encrypt_log "$aider_chat_history"
+
   if [ -z "$TEST_CMD" ]; then
-    echo "No --test-cmd given, treating this as a single-pass edit. See $iter_log."
+    # Report whichever path actually exists now -- encrypt_log() can fail
+    # (bad recipient, etc.) and leave the plaintext in place instead of
+    # producing the .age file, so don't unconditionally claim the .age
+    # path if that's not really what's on disk.
+    if [ -f "$iter_log.age" ]; then
+      echo "No --test-cmd given, treating this as a single-pass edit. See $iter_log.age."
+    else
+      echo "No --test-cmd given, treating this as a single-pass edit. See $iter_log."
+    fi
     success=1
     break
   fi
@@ -154,12 +228,17 @@ $current_task" --auto-commits)
   test_log="$LOG_ROOT/iteration-$i-tests.log"
   if run_tests "$test_log"; then
     echo "Tests passed on iteration $i."
+    encrypt_log "$test_log"
     success=1
     break
   fi
 
   echo "Tests failed on iteration $i, feeding failure back for the next attempt..."
+  # Read the failure output back BEFORE encrypting -- encrypt_log deletes
+  # the plaintext, and this is the one log whose content this script still
+  # needs (to build the next iteration's prompt).
   failure_output="$(tail -c "$MAX_FEEDBACK_CHARS" "$test_log")"
+  encrypt_log "$test_log"
   current_task="The previous attempt's tests failed with this output:
 
 $failure_output
