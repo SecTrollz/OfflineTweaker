@@ -123,6 +123,10 @@ case "$TIER" in
 esac
 
 MODEL_URL="https://huggingface.co/${MODEL_REPO}/resolve/main/${MODEL_FILE}"
+# /raw/ (not /resolve/) returns the literal git-lfs pointer text for an
+# LFS-tracked path -- a few plain-text lines including "oid sha256:<hex>" --
+# served directly by HF's own storage backend, never redirected to a CDN.
+POINTER_URL="https://huggingface.co/${MODEL_REPO}/raw/main/${MODEL_FILE}"
 MODELS_DIR="$HOME/models"
 LLAMA_DIR="$HOME/llama.cpp"
 PROFILE_DIR="$HOME/.offlinetweaker"
@@ -157,15 +161,27 @@ MODEL_PATH="$MODELS_DIR/$MODEL_FILE"
 CHECKSUM_PATH="$MODEL_PATH.sha256"
 TMP_PATH="$MODEL_PATH.part"
 
-# HuggingFace serves LFS files (which all these GGUFs are) with the file's
-# sha256 in the X-Linked-ETag response header on the resolve URL. Fetch it
-# before downloading so a corrupted/truncated/swapped multi-GB download
-# doesn't silently turn into "the model gives weird output" -- which is
-# indistinguishable from normal small-model behavior to whoever's using this.
+# Fetch the file's real sha256 before downloading so a corrupted, truncated,
+# or swapped multi-GB download doesn't silently turn into "the model gives
+# weird output" -- indistinguishable from normal small-model behavior to
+# whoever's using this.
+#
+# This used to scrape the X-Linked-ETag header off a `curl -I -L` HEAD
+# request to the /resolve/ URL -- but that means reading headers off every
+# hop of a redirect chain through HF's CDN, and taking whichever occurrence
+# came last. If more than one hop echoes that header (a CDN edge relaying
+# its own copy, a stale cache, etc.) there's no guarantee the last one is
+# the authoritative one from HF's own storage layer, and no way to tell
+# from here. Fetching the /raw/ pointer file instead sidesteps that
+# entirely: it's a small plain-text response served directly from HF's own
+# git-lfs-backed storage, never redirected through the CDN, so there's
+# exactly one place the hash can come from. --max-filesize caps this at
+# 64KB (real pointer files are well under 200 bytes) so a wrong assumption
+# here fails fast instead of accidentally pulling a multi-GB response
+# through this code path.
 fetch_expected_sha256() {
-  curl -sIL "$MODEL_URL" | tr -d '\r' \
-    | awk -F': ' 'tolower($1)=="x-linked-etag" {print $2}' \
-    | tail -n1 | tr -d '"'
+  curl -sL -m 30 --max-filesize 65536 "$POINTER_URL" \
+    | awk -F'sha256:' '/^oid sha256:/ {print $2}' | tr -d '[:space:]'
 }
 
 # Locks the model file down once it's on disk so nothing after this point --
