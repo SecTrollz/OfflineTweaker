@@ -327,7 +327,16 @@ MAX_FEEDBACK_CHARS=$MAX_FEEDBACK_CHARS
 EOF
 
 echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher..."
-pip install --upgrade pip >/dev/null
+# Do NOT `pip install --upgrade pip` here -- Termux's python-pip package
+# refuses that outright ("Installing pip is forbidden, this will break the
+# python-pip package (termux)"), deliberately, so pip stays in sync with
+# what `pkg` tracks. That's not an occasional/environment-specific
+# failure, it's unconditional on every Termux install, and because this
+# whole script runs under `set -e`, hitting it here aborted the script
+# before ever reaching the actual aider-chat install or writing the
+# launcher below -- confirmed from a real user's run. If pip itself ever
+# genuinely needs to be newer, the correct Termux-idiomatic way is
+# `pkg install -y python-pip`, not pip upgrading itself.
 # A bare `pip install aider-chat` can backtrack much further than you'd
 # expect: if pip can't fully resolve the *latest* release's dependency
 # tree in this environment, it keeps trying older and older releases
