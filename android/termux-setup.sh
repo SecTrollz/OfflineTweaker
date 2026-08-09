@@ -614,6 +614,89 @@ echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher...
 # to huggingface.co (as opposed to pypi.org, which this whole
 # investigation otherwise relied on) is blocked by this environment's
 # proxy, unrelated to this fix.
+#
+# scipy: aider-chat 0.86.2's own metadata pins `scipy==1.15.3` bare, the
+# same unconditional/unmarked way it pins hf-xet -- confirmed against the
+# same pypi.org/pypi/aider-chat/0.86.2/json requires_dist. Real failure
+# from a device that got past the two fixes above: pip falls back to
+# scipy's sdist (its wheels are tagged manylinux/musllinux/macOS/Windows --
+# confirmed against pypi.org/pypi/scipy/1.15.3/json -- nothing matches
+# Termux's platform tag, same story as hf-xet), and that sdist's meson
+# build needs a working Fortran compiler: "Unknown compiler(s):
+# [['gfortran'], ['flang-new'], ['flang'], ...]". Termux ships none of
+# those by default -- confirmed there's no `gfortran` package anywhere in
+# termux-packages at all (Termux's toolchain is clang-based throughout);
+# the closest things are two optional packages, `flang` (LLVM's Fortran
+# frontend) and `lfortran` (an independent compiler project).
+#
+# Unlike hf-xet, this isn't a narrow upstream regression -- scipy's build
+# genuinely needs a Fortran+BLAS/LAPACK toolchain, full stop, and scipy is
+# a large, complex C/C++/Fortran/Cython/pythran codebase, nothing like
+# fastuuid's single-crate Rust build. So the question here was which of two
+# strategies is actually right: get a real Fortran toolchain working on
+# Termux and let scipy build for real, or exclude it the same way as
+# hf-xet, generalizing that same stub-decoy mechanism to a second package.
+# Checked both rather than assuming.
+#
+# Whether scipy can actually be *made* to build on Termux: checked Termux's
+# own package recipe for it, since if anyone has solved this it's Termux's
+# own maintainers, who can throw far more machinery at it than a `pkg
+# install flang` in this script ever could. Confirmed at
+# raw.githubusercontent.com/termux/termux-packages/master/packages/python-scipy/build.sh
+# (current as of writing): building scipy needs `termux_setup_flang` plus a
+# hand-written `wrapper.py` shell that stands in for the real `FC` binary
+# (i.e. flang can't just be invoked directly and expected to work through
+# meson's normal compiler detection), a `python-numpy-static` build
+# dependency, `pythran`, and a custom meson cross-file -- real
+# cross-compilation scaffolding, not just "install a compiler and go". And
+# the line right at the top of that same file settles it either way:
+# `TERMUX_PKG_ON_DEVICE_BUILD_NOT_SUPPORTED=true` -- Termux's own
+# maintainers, with all of the above already built and working in their CI,
+# have explicitly marked on-device scipy builds unsupported. (Compare
+# python-numpy's build.sh, confirmed the same way: no such flag, and it
+# actively branches on `TERMUX_ON_DEVICE_BUILD == "true"`, i.e. numpy *is*
+# meant to support building on-device -- so this isn't a blanket policy
+# against all Python C-extension packages, it's specific to scipy.) Trying
+# to replicate a from-scratch version of scaffolding Termux's own package
+# system won't run on-device is not something this script should attempt.
+# Even setting that aside, Termux's prebuilt python-scipy is version
+# 1.18.0, not aider-chat's exact `==1.15.3` pin (confirmed same file,
+# TERMUX_PKG_VERSION) -- same version-mismatch problem numpy/pillow have
+# below, so it wouldn't satisfy the pin via the psutil trick even if it
+# could be installed.
+#
+# Whether scipy is actually needed at all: confirmed by extracting
+# aider-chat 0.86.2's real wheel and grepping every .py file inside for
+# "import scipy"/"from scipy" -- zero hits outside the dist-info METADATA
+# declaration, same signature as hf-xet. Went a step further than the
+# hf-xet check, though, and didn't stop at aider-chat's own code: downloaded
+# and extracted every other package actually reachable from aider-chat's
+# real dependency graph (litellm's full wheel -- 14.5MB, covering every
+# provider integration it vendors -- plus openai, huggingface-hub, tiktoken,
+# tokenizers, soundfile, sounddevice, mixpanel, posthog, grep-ast,
+# tree-sitter-language-pack, watchfiles, diskcache, pydub) and grepped all
+# of them the same way. The only hit anywhere in that whole surface is
+# pydub's own `pydub/scipy_effects.py` -- and that module is explicitly
+# opt-in (its own docstring: "When this module is imported the high and low
+# pass filters ... will be used ... instead of the ... versions provided by
+# pydub"), never imported by pydub's own `__init__.py` (confirmed reading
+# it: only `from .audio_segment import AudioSegment`) and never imported by
+# aider-chat's own code (confirmed: aider/voice.py only does `from pydub
+# import AudioSegment` / `from pydub.exceptions import ...`). So nothing in
+# the actually-reachable import graph touches scipy, not even indirectly.
+#
+# Confirmed end-to-end in the same throwaway venv as the hf-xet check,
+# using the generalized (see below) two-package version of the same
+# stub-decoy mechanism: final environment has aider-chat installed,
+# `aider --version` and `aider --help` both succeed, and starting aider
+# pointed at a fake local OPENAI_API_BASE (so it reaches its first real
+# network call, exercising far more of the import graph than --version
+# alone -- litellm's provider dispatch, the OpenAI client construction,
+# etc.) still produces no ImportError/ModuleNotFoundError anywhere before
+# it fails on the fake connection, exactly as expected. importlib.metadata
+# confirms scipy is genuinely absent afterward, same as hf-xet.
+# Net conclusion: exclude it, the same way as hf-xet -- not attempt the
+# on-device build Termux's own maintainers have already ruled out.
 AIDER_TMPDIR="$(mktemp -d)"
 # set -e means a failure partway through this block (a real pip error, not
 # the hf-xet workaround) skips straight past the cleanup at the bottom --
@@ -621,27 +704,33 @@ AIDER_TMPDIR="$(mktemp -d)"
 # already used for the SSH tunnel in cloud/agent-loop.sh.
 trap 'rm -rf "$AIDER_TMPDIR"' EXIT
 
-cat > "$AIDER_TMPDIR/find_hfxet_pin.py" << 'PYEOF'
+cat > "$AIDER_TMPDIR/find_pinned_version.py" << 'PYEOF'
 # Reads a --no-deps --report for aider-chat alone and prints the exact
-# version from its own bare (unconditional, unmarked) "hf-xet==X" pin, if
-# any. Prints nothing if aider-chat no longer pins it that way -- callers
-# treat that as "nothing to work around", not an error, so a future
-# aider-chat release that drops or relaxes this pin degrades gracefully
-# back to a plain install instead of this script assuming a stale pin.
+# version from its own bare (unconditional, unmarked) "<name>==X" pin, if
+# any, for the package name given as argv[2] (matched by normalized name,
+# so hf-xet/hf_xet/HF.Xet all count as the same package). Prints nothing if
+# aider-chat no longer pins it that way -- callers treat that as "nothing
+# to work around for this package", not an error, so a future aider-chat
+# release that drops or relaxes any one of these pins degrades gracefully
+# back to installing that package normally instead of this script assuming
+# a stale pin forever.
 import json
 import re
 import sys
 
 with open(sys.argv[1]) as f:
     report = json.load(f)
+target = sys.argv[2]
 
 pin = ""
 for item in report["install"]:
     meta = item["metadata"]
     for req in meta.get("requires_dist") or []:
-        m = re.match(r"^\s*hf[-_.]?xet\s*==\s*([^\s;]+)\s*$", req, re.IGNORECASE)
-        if m:
-            pin = m.group(1)
+        m = re.match(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([^\s;]+)\s*$", req)
+        if not m:
+            continue
+        if re.sub(r"[-_.]+", "-", m.group(1)).lower() == target:
+            pin = m.group(2)
 print(pin)
 PYEOF
 
@@ -678,15 +767,16 @@ PYEOF
 
 cat > "$AIDER_TMPDIR/filter_report.py" << 'PYEOF'
 # Reads a full --report for aider-chat, writes every resolved package as
-# an explicit "name==version" pin EXCEPT hf-xet (matched by normalized
-# name, so hf-xet/hf_xet/HF.Xet all count), for a follow-up --no-deps
-# install. See the big comment above this block for why hf-xet must be
-# excluded rather than satisfied.
+# an explicit "name==version" pin EXCEPT the packages named in argv[3:]
+# (matched by normalized name, so hf-xet/hf_xet/HF.Xet all count as one),
+# for a follow-up --no-deps install. See the big comment above this block
+# for why each of those packages must be excluded rather than satisfied.
 import json
 import re
 import sys
 
 report_path, out_path = sys.argv[1], sys.argv[2]
+exclude = set(sys.argv[3:])
 with open(report_path) as f:
     report = json.load(f)
 
@@ -695,31 +785,32 @@ with open(out_path, "w") as out:
     for item in report["install"]:
         meta = item["metadata"]
         name, version = meta["name"], meta["version"]
-        if re.sub(r"[-_.]+", "-", name).lower() == "hf-xet":
+        if re.sub(r"[-_.]+", "-", name).lower() in exclude:
             skipped.append(f"{name}=={version}")
             continue
         out.write(f"{name}=={version}\n")
 
 if skipped:
-    print("Excluding from install (broken upstream sdist): " + ", ".join(skipped))
+    print("Excluding from install (broken/unsupported upstream build): " + ", ".join(skipped))
 else:
     print(
-        "NOTE: hf-xet wasn't in the resolved graph at all -- the stub wheel "
-        "may not have been needed this run.",
+        "NOTE: none of the excluded packages were in the resolved graph at "
+        "all -- the stub wheels may not have been needed this run.",
         file=sys.stderr,
     )
 PYEOF
 
-echo "Checking aider-chat's own pinned hf-xet version..."
+echo "Checking aider-chat's own pinned versions of the packages known to be"
+echo "broken/unsupported to build on Termux (hf-xet, scipy)..."
 # --force-reinstall is load-bearing here, confirmed by hitting the bug it
 # fixes: on a *second* run (aider-chat already installed and satisfying
 # ">=0.85"), a plain `--no-deps --dry-run --report` produces an install
 # list -- and therefore a metadata section to inspect -- for every package
 # that still needs (re)installing, which on a clean re-run is none. An
 # empty report here would silently look identical to "aider-chat no longer
-# pins hf-xet" and fall through to the plain-install branch below, which
-# runs a normal (non-excluded) resolution and would try to satisfy hf-xet
-# for real again -- reintroducing the exact broken-sdist failure this
+# pins any of these" and fall through to the plain-install branch below,
+# which runs a normal (non-excluded) resolution and would try to satisfy
+# them for real again -- reintroducing the exact broken-build failures this
 # whole block exists to avoid. --force-reinstall makes pip always report
 # aider-chat's real metadata regardless of what's already installed, while
 # --dry-run still guarantees nothing is actually touched -- confirmed by
@@ -727,23 +818,45 @@ echo "Checking aider-chat's own pinned hf-xet version..."
 # `pip show aider-chat` was byte-for-byte unchanged after.
 pip install --ignore-requires-python --no-deps --dry-run --force-reinstall \
   --report "$AIDER_TMPDIR/aider_only_report.json" "aider-chat>=0.85"
-HFXET_PIN="$(python3 "$AIDER_TMPDIR/find_hfxet_pin.py" "$AIDER_TMPDIR/aider_only_report.json")"
 
-if [ -z "$HFXET_PIN" ]; then
-  echo "No unconditional hf-xet pin found in aider-chat's metadata -- the"
-  echo "known-broken-sdist workaround doesn't apply this run, installing normally."
+# Packages aider-chat pins bare (no environment marker) whose install is
+# known broken or unsupported on Termux -- see the case-by-case writeups
+# above for why each one is here. Keyed by normalized name (matches
+# filter_report.py's own normalization); value is the name handed to
+# build_stub_wheel.py -- underscore form for hf-xet, matching how pip's own
+# resolver reports it internally, though this is cosmetic: pip normalizes
+# dashes/underscores when matching requirements either way.
+declare -A EXCLUDED_PKG_STUB_NAME=(
+  [hf-xet]=hf_xet
+  [scipy]=scipy
+)
+
+mkdir -p "$AIDER_TMPDIR/stub"
+EXCLUDED_FOUND=()
+for pkg_norm in "${!EXCLUDED_PKG_STUB_NAME[@]}"; do
+  pin="$(python3 "$AIDER_TMPDIR/find_pinned_version.py" "$AIDER_TMPDIR/aider_only_report.json" "$pkg_norm")"
+  if [ -n "$pin" ]; then
+    echo "aider-chat pins $pkg_norm==$pin -- excluding it (see comment above)."
+    python3 "$AIDER_TMPDIR/build_stub_wheel.py" \
+      "${EXCLUDED_PKG_STUB_NAME[$pkg_norm]}" "$pin" "$AIDER_TMPDIR/stub" >/dev/null
+    EXCLUDED_FOUND+=("$pkg_norm")
+  fi
+done
+
+if [ ${#EXCLUDED_FOUND[@]} -eq 0 ]; then
+  echo "No unconditional pins for the known-broken packages found in"
+  echo "aider-chat's metadata -- the workaround doesn't apply this run,"
+  echo "installing normally."
   pip install --ignore-requires-python "aider-chat>=0.85"
 else
-  echo "aider-chat pins hf-xet==$HFXET_PIN, whose sdist is broken upstream (see"
-  echo "comment above) -- resolving with a throwaway local stub so pip never"
-  echo "needs hf-xet's real metadata, then installing everything else for real."
+  echo "Resolving with throwaway local stubs so pip never needs the excluded"
+  echo "packages' real (broken/unsupported) metadata, then installing"
+  echo "everything else for real."
   AIDER_VERSION="$(python3 -c "
 import json
 with open('$AIDER_TMPDIR/aider_only_report.json') as f:
     print(json.load(f)['install'][0]['metadata']['version'])
 ")"
-  mkdir -p "$AIDER_TMPDIR/stub"
-  python3 "$AIDER_TMPDIR/build_stub_wheel.py" hf_xet "$HFXET_PIN" "$AIDER_TMPDIR/stub"
   # Deliberately NOT --force-reinstall here, unlike the detection step
   # above: this report is the actual install plan, and letting pip skip
   # packages already satisfied from a previous (maybe partial) run is what
@@ -755,13 +868,84 @@ with open('$AIDER_TMPDIR/aider_only_report.json') as f:
     --find-links "$AIDER_TMPDIR/stub" \
     "aider-chat==$AIDER_VERSION"
   python3 "$AIDER_TMPDIR/filter_report.py" \
-    "$AIDER_TMPDIR/full_report.json" "$AIDER_TMPDIR/pinned_specs.txt"
+    "$AIDER_TMPDIR/full_report.json" "$AIDER_TMPDIR/pinned_specs.txt" \
+    "${EXCLUDED_FOUND[@]}"
   pip install --ignore-requires-python --no-deps -r "$AIDER_TMPDIR/pinned_specs.txt"
 fi
 # No explicit rm here -- the trap above already handles normal completion,
 # and (more importantly) also covers a pip failure partway through either
 # branch above, which set -e would otherwise abort past before reaching
 # any cleanup placed here.
+
+# Discovered while smoke-testing the exclusion workaround above (running
+# `aider --version` all the way through on the same Python 3.13 Termux
+# actually ships, not just checking that pip's install step succeeds) --
+# this is a separate bug from scipy/hf-xet, but it sits directly in the
+# same import path and would be the very next failure on-device once those
+# are out of the way, so it's fixed here rather than left for a future
+# round: aider-chat's own dependency graph pulls in pydub==0.25.1 (via
+# aider/voice.py's unconditional `from pydub import AudioSegment  # noqa`,
+# confirmed by reading that file), and pydub's utils.py unconditionally
+# does `import audioop`, falling back to `import pyaudioop as audioop` only
+# if that raises ImportError (confirmed by reading pydub 0.25.1's own
+# utils.py). Python removed the `audioop` stdlib module outright in 3.13
+# (deprecated since 3.11 per PEP 594, actually removed in 3.13) -- and
+# Termux ships Python 3.13, the same version this file's
+# --ignore-requires-python fix further up already exists for -- so on
+# Termux's on-device Python, `import audioop` always raises
+# ModuleNotFoundError. pydub's fallback name, `pyaudioop`, isn't a real
+# installable package on PyPI at all (confirmed: no such project exists),
+# so that fallback can't succeed either. Confirmed the actual failure
+# directly, not just from reading the code: reproduced it in a throwaway
+# venv running the exact Python 3.13.x Termux ships, with a completed
+# aider-chat install (scipy/hf-xet both correctly excluded per the workaround
+# above) -- a plain `aider --version` throws ModuleNotFoundError, and the
+# traceback runs all the way through aider/main.py -> aider/coders/*.py ->
+# aider/commands.py -> aider/voice.py -> pydub -- meaning this breaks
+# aider's entire CLI outright, not just its voice feature, because
+# commands.py imports voice.py unconditionally regardless of whether the
+# user ever touches voice input.
+# audioop-lts (https://pypi.org/project/audioop-lts/, confirmed current
+# version 0.2.2 as of writing) is the official CPython-team-maintained
+# backport -- despite its distribution name, it installs as a top-level
+# `audioop` module, a drop-in replacement, not a separately-named package.
+# Confirmed installing it into the same throwaway venv above makes `import
+# audioop` succeed and `aider --version` print "aider 0.86.2" cleanly.
+# It's not in aider-chat's own dependency graph at all -- pydub 0.25.1
+# predates Python 3.13's audioop removal and was never updated to declare
+# this conditionally -- so it has to be added here explicitly, it will
+# never show up in the multi-phase install above no matter how aider-chat's
+# own pins change.
+# Like hf-xet and scipy, its wheels are tagged manylinux/musllinux/macOS/
+# Windows/etc (confirmed against pypi.org/pypi/audioop-lts/json) -- nothing
+# matches Termux's platform tag, so pip falls back to its sdist here too.
+# Unlike those two, that's not a problem: confirmed by downloading that
+# sdist directly and reading it, audioop-lts is a single plain C file
+# (audioop/_audioop.c) built via ordinary setuptools (no maturin, no
+# meson, no Fortran) -- confirmed it actually builds from that sdist in
+# this sandbox with nothing more than a C compiler, the same category of
+# build as fastuuid's, and Termux already has both a working C compiler
+# (clang, installed on the pkg install line above) and the Python headers
+# needed to build extensions against its own on-device Python (the same
+# prerequisite fastuuid's build already depends on elsewhere in this
+# script). Genuinely unverified without a real device: that this sdist
+# actually compiles clean against Termux's specific clang/bionic
+# combination -- same category of residual uncertainty already flagged for
+# fastuuid/tokenizers above, not a new kind of risk.
+# Guarded on whether `audioop` is actually missing rather than installed
+# unconditionally: harmless either way in principle (Python's own import
+# order resolves a real stdlib module before same-named site-packages code,
+# so this wouldn't shadow anything on a Python that still has it), but
+# there's no reason to spend a pip call and a compiled-wheel build on every
+# run when the stdlib module is already there -- any Python < 3.13, or a
+# future Termux release that ships something newer where this no longer
+# applies.
+if ! python3 -c "import audioop" >/dev/null 2>&1; then
+  echo "Python's stdlib audioop module is gone (removed in 3.13) and pydub"
+  echo "(an aider-chat dependency, imported unconditionally by aider itself)"
+  echo "needs it -- installing the official backport."
+  pip install --ignore-requires-python audioop-lts
+fi
 
 cat > "$HOME/aider-local.sh" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
