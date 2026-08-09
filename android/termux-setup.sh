@@ -152,6 +152,23 @@ else
   git -C "$LLAMA_DIR" pull --ff-only || true
 fi
 
+# llama.cpp's own build downloads its prebuilt web-UI assets from a
+# HuggingFace bucket, versioned by a "b<N>" tag it derives from
+# `git rev-list --count HEAD` (see its cmake/build-info.cmake). That count
+# is meaningless on the --depth 1 clone above -- it only sees the handful
+# of commits actually fetched, not the project's real history -- so it
+# resolves to a small bogus version like "b3" that has never existed on
+# HF, and the first thing the build does is 404 trying to fetch it. Their
+# own script falls back to a "latest" candidate after that fails, so this
+# is usually non-fatal on its own (confirmed: the build still succeeds
+# either way, just without the embedded web UI if both attempts fail), but
+# there's no reason to eat a guaranteed-failing request every single
+# build. tools/ui/CMakeLists.txt reads this from the *environment*, not a
+# -D cache flag (confirmed by testing both -- only the env var actually
+# takes effect), and only at configure time, not build time -- it gets
+# baked into the generated build command right then, so it has to be set
+# before `cmake -S/-B`, not before `cmake --build`.
+export HF_UI_VERSION=latest
 cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=ON
 cmake --build "$LLAMA_DIR/build" --config Release -j"$(nproc)"
 
