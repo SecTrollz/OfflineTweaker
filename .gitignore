@@ -2,11 +2,11 @@
 # Keeping these out of git means setup.sh stays the single source of
 # truth (no drift between the script and a committed copy of its output),
 # and it means secrets (the code-server password) can never be committed.
+# (continue_config.json, requirements.txt, and setup_venv.py used to live
+# here too, but they're generated into ./continue-config/ and ./workspace/
+# now — see the runtime/data volumes patterns below.)
 .env
 docker-compose.yml
-continue_config.json
-requirements.txt
-setup_venv.py
 
 # Runtime/data volumes mounted into the containers — models, chat history,
 # workspace code, generated venvs. Can grow into the multi-GB range.
