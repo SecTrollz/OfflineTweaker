@@ -40,6 +40,10 @@
 # levers: how much failing-test output gets fed back on retry, and how many
 # tokens Aider spends on its repo map. Tune both down for small-context
 # models; leave them unset for a normal desktop-sized context window.
+#
+# For a hosted-API key, prefer exporting OPENAI_API_KEY before running this
+# rather than --api-key -- a key passed on the command line ends up visible
+# to other users via `ps` and saved in shell history.
 
 set -u
 
@@ -48,7 +52,12 @@ TASK=""
 TEST_CMD=""
 MAX_ITERS=5
 API_BASE=""
-API_KEY="sk-local-no-key-required"
+# Prefer an already-exported OPENAI_API_KEY over --api-key: a key passed on
+# the command line is visible to other users via `ps` and gets written to
+# shell history. cloud/agent-loop.sh hands off this way rather than via argv
+# for exactly that reason.
+API_KEY="${OPENAI_API_KEY:-sk-local-no-key-required}"
+API_KEY_FROM_ARG=0
 MODEL=""
 MAX_FEEDBACK_CHARS=4000
 MAP_TOKENS=""
@@ -66,7 +75,7 @@ while [ $# -gt 0 ]; do
     --test-cmd) TEST_CMD="$2"; shift 2 ;;
     --max-iters) MAX_ITERS="$2"; shift 2 ;;
     --api-base) API_BASE="$2"; shift 2 ;;
-    --api-key) API_KEY="$2"; shift 2 ;;
+    --api-key) API_KEY="$2"; API_KEY_FROM_ARG=1; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --max-feedback-chars) MAX_FEEDBACK_CHARS="$2"; shift 2 ;;
     --map-tokens) MAP_TOKENS="$2"; shift 2 ;;
@@ -87,6 +96,10 @@ fi
 if ! command -v aider >/dev/null 2>&1; then
   echo "aider not found on PATH. Install it with: pip install aider-chat" >&2
   exit 1
+fi
+
+if [ "$API_KEY_FROM_ARG" -eq 1 ]; then
+  echo "WARNING: --api-key was passed on the command line -- it's visible to other users via 'ps' and gets saved in shell history. Prefer: export OPENAI_API_KEY=... and omit --api-key." >&2
 fi
 
 export OPENAI_API_BASE="$API_BASE"

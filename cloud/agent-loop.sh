@@ -26,12 +26,18 @@
 #   ./cloud/agent-loop.sh --host 100.x.y.z --no-tunnel \
 #     --model qwen2.5-coder:14b --dir ./myproj --task "..."
 #
-#   # Third-party hosted API:
-#   ./cloud/agent-loop.sh --provider openrouter --api-key "$OPENROUTER_API_KEY" \
+#   # Third-party hosted API (prefer exporting the key over --api-key -- see
+#   # below):
+#   export OPENAI_API_KEY="$OPENROUTER_API_KEY"
+#   ./cloud/agent-loop.sh --provider openrouter \
 #     --model deepseek/deepseek-r1 --dir ./myproj --task "..."
 #
 # Any flag agent/build-loop.sh accepts (--test-cmd, --max-iters,
 # --map-tokens, --max-feedback-chars, ...) can also be passed through here.
+#
+# --api-key is still accepted directly, but prefer exporting OPENAI_API_KEY
+# beforehand instead -- a key passed on the command line ends up visible to
+# other users via `ps` and saved in shell history.
 
 set -u
 
@@ -41,13 +47,17 @@ REMOTE_PORT=11434
 LOCAL_PORT=11434
 PROVIDER=""
 CUSTOM_API_BASE=""
-API_KEY=""
+# Prefer an already-exported OPENAI_API_KEY over --api-key: a key passed on
+# the command line is visible to other users via `ps` and gets written to
+# shell history.
+API_KEY="${OPENAI_API_KEY:-}"
+API_KEY_FROM_ARG=0
 PASSTHROUGH_ARGS=()
 
 usage() {
   echo "Usage:"
   echo "  Self-hosted:   $0 --host <user@host> [--no-tunnel] [--remote-port N] [--local-port N] --model <model> ..."
-  echo "  Hosted API:    $0 --provider <openrouter|together|groq|fireworks|custom> [--api-base <url>] --api-key <key> --model <model> ..."
+  echo "  Hosted API:    $0 --provider <openrouter|together|groq|fireworks|custom> [--api-base <url>] --model <model> ... (needs OPENAI_API_KEY exported, or pass --api-key <key>)"
   echo "  (remaining flags are passed through to agent/build-loop.sh: --dir, --task, --test-cmd, --max-iters, --map-tokens, --max-feedback-chars, ...)"
   exit 1
 }
@@ -64,7 +74,7 @@ while [ $# -gt 0 ]; do
     --local-port) LOCAL_PORT="$2"; shift 2 ;;
     --provider) PROVIDER="$2"; shift 2 ;;
     --api-base) CUSTOM_API_BASE="$2"; shift 2 ;;
-    --api-key) API_KEY="$2"; shift 2 ;;
+    --api-key) API_KEY="$2"; API_KEY_FROM_ARG=1; shift 2 ;;
     --model) MODEL="$2"; PASSTHROUGH_ARGS+=(--model "$2"); shift 2 ;;
     -h|--help) usage ;;
     *) PASSTHROUGH_ARGS+=("$1"); shift ;;
@@ -136,7 +146,7 @@ elif [ -n "$PROVIDER" ]; then
       ;;
   esac
   if [ -z "$API_KEY" ]; then
-    echo "--api-key is required for --provider $PROVIDER." >&2
+    echo "An API key is required for --provider $PROVIDER -- export OPENAI_API_KEY or pass --api-key <key>." >&2
     exit 1
   fi
   echo "WARNING: sending your task and code to $PROVIDER ($API_BASE) over the network. This is not offline."
@@ -146,4 +156,11 @@ else
   usage
 fi
 
-exec "$BUILD_LOOP" --api-base "$API_BASE" --api-key "$API_KEY" "${PASSTHROUGH_ARGS[@]}"
+if [ "$API_KEY_FROM_ARG" -eq 1 ]; then
+  echo "WARNING: --api-key was passed on the command line -- it's visible to other users via 'ps' and gets saved in shell history. Prefer: export OPENAI_API_KEY=... and omit --api-key." >&2
+fi
+
+# Hand off via env var, not argv -- build-loop.sh's own process listing
+# would otherwise show the key too.
+export OPENAI_API_KEY="$API_KEY"
+exec "$BUILD_LOOP" --api-base "$API_BASE" "${PASSTHROUGH_ARGS[@]}"
