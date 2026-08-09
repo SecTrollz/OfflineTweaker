@@ -40,8 +40,10 @@ device's name:
 ```bash
 git clone https://GitHub.com/SecTrollz/OfflineTweaker.git
 cd OfflineTweaker
-chmod +x setup.sh
-./setup.sh
+# uncomment run these if not android  'chmod +x setup.sh && ./setup.sh' then after run, 'chmod +x run-model.sh && run-model.sh' 
+cd android 
+chmod +x termux-setup.sh
+./termux-setup.sh
 termux-wake-lock
 ./run-model.sh
 ```
