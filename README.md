@@ -1,6 +1,5 @@
 # OfflineTweaker
-## Offline AI Coding Powerhouse (exceeds Replit Pro/Base44)
-
+## world domination step 1
 Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
 Agent modes:
 - **Autonomous build loop** (`agent/build-loop.sh`): give it a task, it
@@ -11,7 +10,7 @@ Agent modes:
 - Jupyter notebooks for scripts/REPL
 
 Tips:
-- Change PASSWORD in docker-compose.yml
+- DO NOT FORGET 🚫 YOU MUST Change the PASSWORD in docker-compose.yml
 - Ports bind to 127.0.0.1 by default (safe on a shared/cloud box too) — see
   [Cloud](#cloud) for how to reach them from another device
 - For GPU: add NVIDIA section in compose
@@ -22,16 +21,18 @@ Tips:
 ## On-Device (Android / Termux)
 
 For running fully offline directly on a phone (no server, no Docker) via
-[Termux](https://f-droid.org/packages/com.termux/) + native llama.cpp.
+Termux + native llama.cpp.
 **Works on any Termux-capable Android phone** — RAM is auto-detected (via
 `/proc/meminfo`) and bucketed into a tier, no need to know a specific
 device's name:
 
 ```bash
-cd android
-./termux-setup.sh          # auto-detects RAM, picks a model tier
+git clone https://GitHub.com/SecTrollz/Offline Tweaker.git
+cd OfflineTweaker
+chmod +x setup.sh
+./setup.sh
 termux-wake-lock
-~/run-model.sh
+./run-model.sh
 ```
 
 Then either:
@@ -56,11 +57,9 @@ Same model at the 3/4/6GB tiers on purpose — DeepSeek only ships a 1.5B or a
 7B+ distill, nothing in between, so the extra headroom on a 6GB phone goes
 into a bigger context window instead. Force a specific tier with
 `./termux-setup.sh --ram 8gb` if auto-detection picks wrong, or use the
-legacy aliases `./termux-setup.sh pixel9a` / `motog5g`.
+legacy aliases `./setup.sh pixel9a` / `motog5g`.
 
 Notes:
-- Install Termux from F-Droid — the Play Store build is outdated and can't
-  build native code.
 - Run `termux-setup-storage` (the setup script does this for you) so the
   model file survives Termux updates.
 - `termux-wake-lock` prevents Android from suspending inference mid-response.
@@ -72,7 +71,7 @@ Notes:
 
 ## Autonomous Build Loop
 
-This is the piece that makes it a *builder* rather than a chat window, the
+This piece makes it a *builder* rather than a chat window, the
 same idea behind Replit Agent / Emergent: hand it a task, it writes code,
 **runs your tests, reads the failures, and fixes it itself** — repeating
 until the tests pass or it runs out of attempts. Fully offline, on top of
@@ -142,12 +141,12 @@ API. Both go through `cloud/agent-loop.sh`:
 
 ```bash
 # Your own rented VM (VPS / cloud GPU box) running setup.sh's stack.
-# Opens a private SSH tunnel by default -- the VM's ports are bound to
+# Opens a private SSH tunnel by default the VM's ports are bound to
 # 127.0.0.1 only (see setup.sh), so this is the only way in:
 ./cloud/agent-loop.sh --host user@1.2.3.4 --model qwen2.5-coder:14b \
   --dir ./myproj --task "Add input validation" --test-cmd "pytest -q"
 
-# Same, but the VM is already on a private network (e.g. Tailscale) --
+# Same, but VM is already on a private network (e.g. Tailscale) --
 # skip the tunnel and connect directly:
 ./cloud/agent-loop.sh --host 100.x.y.z --no-tunnel \
   --model qwen2.5-coder:14b --dir ./myproj --task "..."
