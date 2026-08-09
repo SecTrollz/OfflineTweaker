@@ -32,11 +32,18 @@ fi
 # to 0.0.0.0 would put an unauthenticated LLM API on the public internet.
 # To reach a cloud VM's services from elsewhere, use cloud/agent-loop.sh
 # (SSH tunnel) or Tailscale rather than widening these bindings.
+#
+# Images are pinned to specific versions rather than :latest/:main --
+# floating tags mean an upstream push can silently break or change behavior
+# of every running stack with no changelog to consult. Each is still
+# overridable per the ${VAR:-default} syntax below (e.g. OLLAMA_DOCKER_TAG=
+# in .env) if you want to track upstream more closely or pin differently;
+# bump the defaults here periodically.
 if [ ! -f docker-compose.yml ]; then
 cat > docker-compose.yml << 'EOF'
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-0.32.6}
     container_name: ollama
     ports:
       - "127.0.0.1:11434:11434"
@@ -53,7 +60,7 @@ services:
     #           capabilities: [gpu]
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG:-0.11.0}
     container_name: open-webui
     ports:
       - "127.0.0.1:3000:8080"
@@ -66,7 +73,7 @@ services:
     restart: unless-stopped
 
   code-server:
-    image: codercom/code-server:latest
+    image: codercom/code-server:${CODE_SERVER_DOCKER_TAG:-4.131.0}
     container_name: code-server
     ports:
       - "127.0.0.1:8080:8080"
@@ -183,6 +190,9 @@ echo "7. Open WebUI chat: http://localhost:3000"
 echo "8. Running this on a rented cloud VM instead? Services are bound to"
 echo "   127.0.0.1 only — connect from your phone/laptop with"
 echo "   cloud/agent-loop.sh (SSH tunnel) rather than opening these ports."
+echo "9. Image versions are pinned in docker-compose.yml -- override e.g."
+echo "   OLLAMA_DOCKER_TAG=latest in .env if you want to track upstream"
+echo "   more closely, then 'docker compose up -d' to apply."
 echo "All set for offline mobile dev! 🎉"
 
 chmod +x setup.sh

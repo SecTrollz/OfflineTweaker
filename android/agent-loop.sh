@@ -9,9 +9,13 @@
 # Prereqs: ~/run-model.sh already running in another Termux session
 # (started via android/termux-setup.sh).
 #
+# This runs unattended and auto-commits every edit (no review step, no
+# sandbox on-device), so it prompts for confirmation before starting unless
+# --yes/-y is passed (required for non-interactive/scripted use).
+#
 # Usage:
 #   ./agent-loop.sh --dir <project-dir> --task "<task>" \
-#                    [--test-cmd "<command>"] [--max-iters N]
+#                    [--test-cmd "<command>"] [--max-iters N] [--yes]
 
 set -e
 
@@ -33,6 +37,45 @@ fi
 
 echo "Using saved profile: ${DEVICE_TIER:-unknown tier} -> ${MODEL_LABEL:-$MODEL_ALIAS}"
 
+# build-loop.sh runs unattended and auto-commits every edit it makes
+# (--yes-always --auto-commits, up to --max-iters rounds) with no sandbox on
+# this path -- it's editing real files on the device directly. That's a
+# different risk on a phone than on the Docker-isolated desktop stack, so
+# require an explicit nod before it starts, unless the caller already knows
+# what they're doing (--yes) or this isn't an interactive session anyway.
+ASSUME_YES=0
+ARGS=()
+# A plain `for arg in "$@"` scan can't tell a bare --yes/-y token apart from
+# the same string showing up as *the value* of another flag (e.g.
+# --task "-y") -- it would strip it and desync every arg after it. Walk with
+# shift instead, same as build-loop.sh's own parser, so a value-taking
+# flag's argument is never inspected for --yes/-y.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y) ASSUME_YES=1; shift ;;
+    --dir|--task|--test-cmd|--max-iters|--model|--api-base|--api-key|--max-feedback-chars|--map-tokens)
+      ARGS+=("$1" "$2"); shift 2 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+
+if [ "$ASSUME_YES" -ne 1 ]; then
+  echo
+  echo "WARNING: this will let the model edit files in your project directory"
+  echo "and auto-commit each attempt, unattended, for up to --max-iters rounds --"
+  echo "there is no review step and no sandbox on this path."
+  if [ -t 0 ]; then
+    read -r -p "Proceed? [y/N] " reply
+    case "$reply" in
+      y|Y|yes|YES) ;;
+      *) echo "Aborted. Pass --yes to skip this prompt next time." >&2; exit 1 ;;
+    esac
+  else
+    echo "Non-interactive session and no --yes given -- aborting rather than running unattended silently." >&2
+    exit 1
+  fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 exec "$SCRIPT_DIR/../agent/build-loop.sh" \
@@ -41,4 +84,4 @@ exec "$SCRIPT_DIR/../agent/build-loop.sh" \
   --api-key "sk-local-no-key-required" \
   --map-tokens "${MAP_TOKENS:-0}" \
   --max-feedback-chars "${MAX_FEEDBACK_CHARS:-2000}" \
-  "$@"
+  "${ARGS[@]}"

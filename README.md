@@ -1,5 +1,5 @@
 # OfflineTweaker
-## world domination step 1
+## Desktop (Docker)
 Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
 Agent modes:
 - **Autonomous build loop** (`agent/build-loop.sh`): give it a task, it
@@ -16,6 +16,10 @@ Tips:
 - Ports bind to 127.0.0.1 by default (safe on a shared/cloud box too) — see
   [Cloud](#cloud) for how to reach them from another device
 - For GPU: add NVIDIA section in compose
+- Image versions are pinned in `docker-compose.yml` (not `:latest`/`:main`)
+  so an upstream push can't silently change a running stack. Override per
+  image by setting e.g. `OLLAMA_DOCKER_TAG=latest` in `.env`, then
+  `docker compose up -d` to apply.
 - Workspace: ./workspace (persisted forever)
 - Fully offline after model pull (unless you opt into [Cloud](#cloud))
 - Export to GitHub anytime
@@ -39,14 +43,14 @@ device's name:
 
 ```bash
 git clone https://GitHub.com/SecTrollz/OfflineTweaker.git
-cd OfflineTweaker
-# uncomment run these if not android  'chmod +x setup.sh && ./setup.sh' then after run, 'chmod +x run-model.sh && run-model.sh' 
-cd android 
+cd OfflineTweaker/android
 chmod +x termux-setup.sh
 ./termux-setup.sh
 termux-wake-lock
-./run-model.sh
+~/run-model.sh
 ```
+
+(Setting up the Docker desktop stack instead? See [Desktop (Docker)](#desktop-docker) above for `./setup.sh`.)
 
 Then either:
 - open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or
@@ -165,8 +169,11 @@ API. Both go through `cloud/agent-loop.sh`:
   --model qwen2.5-coder:14b --dir ./myproj --task "..."
 
 # Third-party hosted API (OpenRouter/Together/Groq/Fireworks/custom).
-# This leaves the machine -- not offline -- and the script warns every time:
-./cloud/agent-loop.sh --provider openrouter --api-key "$OPENROUTER_API_KEY" \
+# This leaves the machine -- not offline -- and the script warns every time.
+# Export the key rather than passing --api-key -- a key on the command line
+# is visible to other users via `ps` and gets saved in shell history:
+export OPENAI_API_KEY="$OPENROUTER_API_KEY"
+./cloud/agent-loop.sh --provider openrouter \
   --model deepseek/deepseek-r1 --dir ./myproj --task "..."
 ```
 
@@ -176,4 +183,8 @@ command above instead of opening the ports publicly.
 
 Any `agent/build-loop.sh` flag (`--test-cmd`, `--max-iters`, `--map-tokens`,
 `--max-feedback-chars`, ...) passes straight through.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 

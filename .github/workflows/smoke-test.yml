@@ -1,0 +1,80 @@
+name: Smoke Test
+
+# ShellCheck only lints syntax -- it never proves setup.sh actually produces
+# a working stack. This boots the real docker-compose stack setup.sh
+# generates and confirms each service answers on its port, so a change that
+# breaks the install path fails CI instead of a user's machine.
+#
+# Scoped to when setup.sh or this workflow change, since it pulls several
+# multi-hundred-MB images -- not something every unrelated README/docs push
+# needs to pay for. Runnable on demand via workflow_dispatch too.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'setup.sh'
+      - '.github/workflows/smoke-test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'setup.sh'
+      - '.github/workflows/smoke-test.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run setup.sh
+        run: |
+          chmod +x setup.sh
+          ./setup.sh
+
+      - name: Check generated files exist
+        run: |
+          for f in .env docker-compose.yml workspace/requirements.txt \
+                   workspace/setup_venv.py continue-config/config.json; do
+            if [ ! -f "$f" ]; then
+              echo "Expected setup.sh to generate $f, but it's missing." >&2
+              exit 1
+            fi
+          done
+          echo "All expected generated files present."
+
+      - name: Bring up the stack
+        run: docker compose up -d
+
+      - name: Wait for services to respond
+        run: |
+          check() {
+            local name="$1" url="$2" tries=30
+            echo "Waiting for $name ($url)..."
+            for _ in $(seq 1 "$tries"); do
+              code="$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)"
+              # Any response at all (even a 4xx from an app that's up but
+              # doesn't like the path) means the service is listening --
+              # that's what this check cares about, not routing correctness.
+              if [ "$code" != "000" ]; then
+                echo "$name responded with HTTP $code."
+                return 0
+              fi
+              sleep 2
+            done
+            echo "$name never responded after $((tries * 2))s." >&2
+            return 1
+          }
+          check ollama       "http://127.0.0.1:11434/api/tags"
+          check open-webui   "http://127.0.0.1:3000/"
+          check code-server  "http://127.0.0.1:8080/"
+
+      - name: Show container status on failure
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
