@@ -1,5 +1,5 @@
 # OfflineTweaker
-## world domination step 1
+## Desktop (Docker)
 Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
 Agent modes:
 - **Autonomous build loop** (`agent/build-loop.sh`): give it a task, it
@@ -39,14 +39,14 @@ device's name:
 
 ```bash
 git clone https://GitHub.com/SecTrollz/OfflineTweaker.git
-cd OfflineTweaker
-# uncomment run these if not android  'chmod +x setup.sh && ./setup.sh' then after run, 'chmod +x run-model.sh && run-model.sh' 
-cd android 
+cd OfflineTweaker/android
 chmod +x termux-setup.sh
 ./termux-setup.sh
 termux-wake-lock
-./run-model.sh
+~/run-model.sh
 ```
+
+(Setting up the Docker desktop stack instead? See [Desktop (Docker)](#desktop-docker) above for `./setup.sh`.)
 
 Then either:
 - open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or

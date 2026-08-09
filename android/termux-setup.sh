@@ -153,10 +153,56 @@ cmake --build "$LLAMA_DIR/build" --config Release -j"$(nproc)"
 
 echo "[4/6] Downloading $MODEL_LABEL..."
 mkdir -p "$MODELS_DIR"
-if [ -f "$MODELS_DIR/$MODEL_FILE" ]; then
-  echo "Model already present at $MODELS_DIR/$MODEL_FILE, skipping download."
+MODEL_PATH="$MODELS_DIR/$MODEL_FILE"
+CHECKSUM_PATH="$MODEL_PATH.sha256"
+
+# HuggingFace serves LFS files (which all these GGUFs are) with the file's
+# sha256 in the X-Linked-ETag response header on the resolve URL. Fetch it
+# before downloading so a corrupted/truncated/swapped multi-GB download
+# doesn't silently turn into "the model gives weird output" -- which is
+# indistinguishable from normal small-model behavior to whoever's using this.
+fetch_expected_sha256() {
+  curl -sIL "$MODEL_URL" | tr -d '\r' \
+    | awk -F': ' 'tolower($1)=="x-linked-etag" {print $2}' \
+    | tail -n1 | tr -d '"'
+}
+
+verify_checksum() {
+  # $1 = expected sha256 (may be empty if HF didn't send one)
+  local expected="$1" actual
+  if [ -z "$expected" ]; then
+    echo "WARNING: couldn't fetch an expected checksum from HuggingFace; skipping integrity check for $MODEL_FILE." >&2
+    return 0
+  fi
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "WARNING: sha256sum not found; skipping integrity check for $MODEL_FILE." >&2
+    return 0
+  fi
+  actual="$(sha256sum "$MODEL_PATH" | awk '{print $1}')"
+  if [ "$actual" != "$expected" ]; then
+    echo "ERROR: checksum mismatch for $MODEL_FILE." >&2
+    echo "  expected: $expected" >&2
+    echo "  actual:   $actual" >&2
+    echo "Deleting the corrupted/tampered download. Re-run this script to retry." >&2
+    rm -f "$MODEL_PATH"
+    exit 1
+  fi
+  echo "$expected" > "$CHECKSUM_PATH"
+  echo "Checksum verified for $MODEL_FILE."
+}
+
+if [ -f "$MODEL_PATH" ]; then
+  if [ -f "$CHECKSUM_PATH" ] && command -v sha256sum >/dev/null 2>&1 \
+     && echo "$(cat "$CHECKSUM_PATH")  $MODEL_PATH" | sha256sum -c --status - 2>/dev/null; then
+    echo "Model already present at $MODEL_PATH, checksum verified previously, skipping download."
+  else
+    echo "Model already present at $MODEL_PATH but not previously verified -- checking integrity now..."
+    verify_checksum "$(fetch_expected_sha256)"
+  fi
 else
-  curl -L --fail -o "$MODELS_DIR/$MODEL_FILE" "$MODEL_URL"
+  EXPECTED_SHA256="$(fetch_expected_sha256)"
+  curl -L --fail -o "$MODEL_PATH" "$MODEL_URL"
+  verify_checksum "$EXPECTED_SHA256"
 fi
 
 echo "[5/6] Writing server launcher and saved profile..."
