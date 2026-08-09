@@ -45,10 +45,17 @@ echo "Using saved profile: ${DEVICE_TIER:-unknown tier} -> ${MODEL_LABEL:-$MODEL
 # what they're doing (--yes) or this isn't an interactive session anyway.
 ASSUME_YES=0
 ARGS=()
-for arg in "$@"; do
-  case "$arg" in
-    --yes|-y) ASSUME_YES=1 ;;
-    *) ARGS+=("$arg") ;;
+# A plain `for arg in "$@"` scan can't tell a bare --yes/-y token apart from
+# the same string showing up as *the value* of another flag (e.g.
+# --task "-y") -- it would strip it and desync every arg after it. Walk with
+# shift instead, same as build-loop.sh's own parser, so a value-taking
+# flag's argument is never inspected for --yes/-y.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes|-y) ASSUME_YES=1; shift ;;
+    --dir|--task|--test-cmd|--max-iters|--model|--api-base|--api-key|--max-feedback-chars|--map-tokens)
+      ARGS+=("$1" "$2"); shift 2 ;;
+    *) ARGS+=("$1"); shift ;;
   esac
 done
 
