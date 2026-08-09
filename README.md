@@ -85,6 +85,14 @@ Notes:
 - The chosen tier/model is saved to `~/.offlinetweaker/profile.env`, which
   `android/agent-loop.sh` reads automatically — re-run `termux-setup.sh`
   with a different `--ram` to switch tiers later.
+- After a model file passes checksum verification it's locked read-only
+  (`chmod 444`, plus a best-effort `chattr +i` where the device allows it)
+  so nothing can silently modify it afterward. To force a re-download
+  (switching tiers, suspected corruption, etc.), remove it explicitly
+  first: `chattr -i ~/models/*.gguf 2>/dev/null; rm -f ~/models/*.gguf*`
+  (the `chattr -i` is only load-bearing if you're on a rooted device where
+  it actually took effect — harmless no-op otherwise) — then re-run
+  `termux-setup.sh`.
 
 ## Autonomous Build Loop
 

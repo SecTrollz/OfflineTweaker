@@ -155,6 +155,7 @@ echo "[4/6] Downloading $MODEL_LABEL..."
 mkdir -p "$MODELS_DIR"
 MODEL_PATH="$MODELS_DIR/$MODEL_FILE"
 CHECKSUM_PATH="$MODEL_PATH.sha256"
+TMP_PATH="$MODEL_PATH.part"
 
 # HuggingFace serves LFS files (which all these GGUFs are) with the file's
 # sha256 in the X-Linked-ETag response header on the resolve URL. Fetch it
@@ -167,9 +168,32 @@ fetch_expected_sha256() {
     | tail -n1 | tr -d '"'
 }
 
+# Locks the model file down once it's on disk so nothing after this point --
+# another script, a buggy app, a later compromised process -- can silently
+# modify weights that were already verified (or that we chose to accept
+# unverified, e.g. sha256sum missing). This is best-effort, not a hard
+# guarantee: Termux runs unprivileged with no root, so the ext4/f2fs
+# "immutable" file attribute normally isn't available to it the way it
+# would be on a rooted device or a normal Linux box -- chattr +i is
+# attempted as a bonus on top of the reliable chmod 444, and its failure
+# in the normal unprivileged case is expected, not a sign anything's wrong.
+#
+# IMPORTANT if it *does* succeed (root, a rooted phone, tsu, etc.): the
+# immutable attribute blocks removal outright -- even `rm -f`, even for
+# root -- until it's cleared. `chattr -i` before `rm -f` is what actually
+# forces a refresh in that case; plain `rm -f` alone is only guaranteed to
+# work when chattr silently no-opped, which is the common case here but
+# not one this script can assume.
+lock_model_file() {
+  chmod 444 "$MODEL_PATH" 2>/dev/null || true
+  chattr +i "$MODEL_PATH" 2>/dev/null || true
+}
+
 verify_checksum() {
-  # $1 = expected sha256 (may be empty if HF didn't send one)
-  local expected="$1" actual
+  # $1 = path to the file being checked, $2 = expected sha256 (may be empty
+  # if HF didn't send one). Never mutates $MODEL_PATH directly -- the caller
+  # decides what happens to the path that was actually checked.
+  local path="$1" expected="$2" actual
   if [ -z "$expected" ]; then
     echo "WARNING: couldn't fetch an expected checksum from HuggingFace; skipping integrity check for $MODEL_FILE." >&2
     return 0
@@ -178,13 +202,19 @@ verify_checksum() {
     echo "WARNING: sha256sum not found; skipping integrity check for $MODEL_FILE." >&2
     return 0
   fi
-  actual="$(sha256sum "$MODEL_PATH" | awk '{print $1}')"
+  actual="$(sha256sum "$path" | awk '{print $1}')"
   if [ "$actual" != "$expected" ]; then
     echo "ERROR: checksum mismatch for $MODEL_FILE." >&2
     echo "  expected: $expected" >&2
     echo "  actual:   $actual" >&2
     echo "Deleting the corrupted/tampered download. Re-run this script to retry." >&2
-    rm -f "$MODEL_PATH"
+    # If a prior run's lock_model_file() got far enough to set the
+    # immutable attribute on this path (only possible with elevated
+    # privileges -- not the normal unprivileged-Termux case, but this must
+    # not silently get stuck if it happens), that attribute blocks removal
+    # outright, even with rm -f, even for root, until it's cleared first.
+    chattr -i "$path" 2>/dev/null || true
+    rm -f "$path"
     exit 1
   fi
   echo "$expected" > "$CHECKSUM_PATH"
@@ -197,12 +227,19 @@ if [ -f "$MODEL_PATH" ]; then
     echo "Model already present at $MODEL_PATH, checksum verified previously, skipping download."
   else
     echo "Model already present at $MODEL_PATH but not previously verified -- checking integrity now..."
-    verify_checksum "$(fetch_expected_sha256)"
+    verify_checksum "$MODEL_PATH" "$(fetch_expected_sha256)"
   fi
+  lock_model_file
 else
+  # Download to a temp path and verify *before* anything ever lands at
+  # MODEL_PATH -- an unverified or tampered file should never be
+  # observable at the canonical path, even briefly.
+  rm -f "$TMP_PATH"
   EXPECTED_SHA256="$(fetch_expected_sha256)"
-  curl -L --fail -o "$MODEL_PATH" "$MODEL_URL"
-  verify_checksum "$EXPECTED_SHA256"
+  curl -L --fail -o "$TMP_PATH" "$MODEL_URL"
+  verify_checksum "$TMP_PATH" "$EXPECTED_SHA256"
+  mv -f "$TMP_PATH" "$MODEL_PATH"
+  lock_model_file
 fi
 
 echo "[5/6] Writing server launcher and saved profile..."
