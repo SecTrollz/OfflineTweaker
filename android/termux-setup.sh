@@ -345,13 +345,28 @@ echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher...
 # numpy==1.24.3). That specific numpy is unbuildable on Python 3.12+ --
 # not slow, not flaky, unconditionally broken -- because it still depends
 # on numpy.distutils, which needs the stdlib `distutils` module that
-# Python removed in 3.12. Termux ships new Python (3.13+ as of writing),
-# so this is exactly the trap. A floor version keeps pip on aider-chat's
-# modern dependency set (numpy>=1.26, which moved to the meson build
-# system specifically because of the distutils removal) instead of ever
-# considering those ancient pins. Bump the floor occasionally; the point
-# isn't this exact number, it's staying well clear of the old-pins era.
-pip install "aider-chat>=0.85"
+# Python removed in 3.12. A floor version keeps pip on aider-chat's modern
+# dependency set (numpy pinned to something recent, which moved to the
+# meson build system specifically because of the distutils removal)
+# instead of ever considering those ancient pins. Bump the floor
+# occasionally; the point isn't this exact number, it's staying clear of
+# the old-pins era.
+#
+# --ignore-requires-python is separately load-bearing, confirmed from a
+# real device: every current aider-chat release (0.83.0 through at least
+# 0.86.2, checked live against PyPI) declares
+# Requires-Python ">=3.10,<3.13" -- it hasn't yet been updated to declare
+# support for 3.13, which is what Termux ships as of writing. Without this
+# flag, pip refuses every version above ~0.16 outright on Python 3.13 and
+# the floor above becomes unsatisfiable, which is worse than the original
+# bug: it fails immediately instead of eventually backtracking into
+# something installable. This bypasses that metadata check; aider-chat is
+# mostly pure Python, so this is a reasonable bet, not a guaranteed fix --
+# genuinely unverified past this point without a real Python 3.13/Termux
+# device, since this sandbox can't simulate whether aider-chat's own
+# pinned numpy version actually *builds* from source on 3.13 (no wheel for
+# it exists yet), only that pip agrees to try.
+pip install --ignore-requires-python "aider-chat>=0.85"
 
 cat > "$HOME/aider-local.sh" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
