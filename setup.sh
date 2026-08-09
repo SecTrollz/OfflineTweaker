@@ -81,9 +81,13 @@ else
   echo "docker-compose.yml already exists, leaving it untouched."
 fi
 
-# Create Continue config (pre-configured for Ollama)
-if [ ! -f continue_config.json ]; then
-cat > continue_config.json << 'EOF'
+# Create Continue config (pre-configured for Ollama).
+# Written into ./continue-config/, which docker-compose mounts to
+# /home/coder/.continue inside code-server — that's the path the Continue
+# extension actually reads, so it has to live there (not the repo root) to
+# take effect.
+if [ ! -f continue-config/config.json ]; then
+cat > continue-config/config.json << 'EOF'
 {
   "models": [
     {
@@ -107,12 +111,15 @@ cat > continue_config.json << 'EOF'
 }
 EOF
 else
-  echo "continue_config.json already exists, leaving it untouched."
+  echo "continue-config/config.json already exists, leaving it untouched."
 fi
 
-# Create requirements.txt for Python workspace
-if [ ! -f requirements.txt ]; then
-cat > requirements.txt << 'EOF'
+# Create requirements.txt for the Python workspace. Written into ./workspace/,
+# which docker-compose mounts to /home/coder/workspace inside code-server —
+# it has to live there, not the repo root, or setup_venv.py (also run from
+# inside that container) won't be able to find it.
+if [ ! -f workspace/requirements.txt ]; then
+cat > workspace/requirements.txt << 'EOF'
 numpy
 pandas
 matplotlib
@@ -124,12 +131,15 @@ langchain
 langchain-community
 EOF
 else
-  echo "requirements.txt already exists, leaving it untouched."
+  echo "workspace/requirements.txt already exists, leaving it untouched."
 fi
 
-# Create Python workspace setup script
-if [ ! -f setup_venv.py ]; then
-cat > setup_venv.py << 'EOF'
+# Create Python workspace setup script. Also written into ./workspace/ (see
+# above) — it hardcodes /home/coder/workspace paths because it's meant to be
+# run *inside* the code-server container, where that's where this file and
+# requirements.txt actually land.
+if [ ! -f workspace/setup_venv.py ]; then
+cat > workspace/setup_venv.py << 'EOF'
 #!/usr/bin/env python3
 import os
 import subprocess
@@ -158,7 +168,7 @@ else:
     print("Venv already exists.")
 EOF
 else
-  echo "setup_venv.py already exists, leaving it untouched."
+  echo "workspace/setup_venv.py already exists, leaving it untouched."
 fi
 
 echo "✅ All files created!"
