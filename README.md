@@ -135,6 +135,34 @@ How it works:
 Omit `--test-cmd` for a single-pass edit with no verification loop (useful
 for tasks with no obvious pass/fail check, like "add a README").
 
+**Encrypting the logs.** Every iteration's task/response transcript and
+test output lands in `.offlinetweaker/agent-logs/` as plaintext by
+default. To encrypt it at rest, using
+[age](https://age-encryption.org) (one-time setup, then it's automatic):
+
+```bash
+age-keygen -o ~/.offlinetweaker/logs-key.txt   # prints an age1... public key
+./agent/build-loop.sh --dir ./myproj --task "..." --model ... --api-base ... \
+  --encrypt-logs age1yourpublickeyhere...
+# or pass the key FILE instead of the raw key text -- either works:
+--encrypt-logs ~/.offlinetweaker/logs-key.txt
+```
+
+Every log this run produces (including Aider's own chat-history file) is
+encrypted to that key and the plaintext is deleted, no prompt needed per
+file. Decrypt later with:
+
+```bash
+age -d -i ~/.offlinetweaker/logs-key.txt iteration-1.log.age
+```
+
+`~/.offlinetweaker/logs-key.txt` is the only thing that can decrypt these
+— guard it like a password (`age-keygen` already sets it `chmod 600`).
+This is asymmetric (recipient-key) encryption on purpose, not a
+passphrase: a passphrase would mean re-typing it at every file write,
+which doesn't work for an unattended loop — age's own passphrase mode
+refuses to run non-interactively for exactly that reason.
+
 **Context budget matters on small local models.** A verbose response plus
 Aider's repo map plus a large failure dump can eat a small context window
 before the model even sees the code. Two flags tune that:

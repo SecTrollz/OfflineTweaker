@@ -53,7 +53,7 @@ ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes|-y) ASSUME_YES=1; shift ;;
-    --dir|--task|--test-cmd|--max-iters|--model|--api-base|--api-key|--max-feedback-chars|--map-tokens)
+    --dir|--task|--test-cmd|--max-iters|--model|--api-base|--api-key|--max-feedback-chars|--map-tokens|--encrypt-logs)
       ARGS+=("$1" "$2"); shift 2 ;;
     *) ARGS+=("$1"); shift ;;
   esac
