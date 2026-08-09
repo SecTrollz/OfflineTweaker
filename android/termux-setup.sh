@@ -142,7 +142,59 @@ termux-setup-storage || true
 
 echo "[2/6] Installing build toolchain..."
 pkg update -y
-pkg install -y git cmake golang clang make curl python
+# `rust` is here for aider-chat's transitive dependencies, not for anything
+# built directly in this script. Confirmed from a real device: pip installing
+# aider-chat pulls in fastuuid==0.14.0 (a Rust/maturin extension), and PyPI
+# has no wheel for Termux's non-standard platform tag, so pip falls back to
+# building it from source. That build's own dependency resolution needs
+# maturin, and maturin's PEP 517 backend (confirmed by reading
+# github.com/PyO3/maturin's maturin/__init__.py) only tries to bootstrap a
+# Rust toolchain itself -- via the `puccinialin` helper, which is what prints
+# the "Rust not found, installing into a temporary directory" line seen in
+# the real failure -- when `shutil.which("cargo")` finds nothing on PATH.
+# That bootstrap shells out to rustup, and rustup has no prebuilt toolchain
+# for the `aarch64-unknown-linux-android` *host* triple Termux reports
+# (rustup only knows that triple as a cross-compile target from a normal
+# Linux/macOS host, not as an installable native toolchain when already
+# running inside Android/Termux), so the bootstrap -- and the whole build --
+# fails unconditionally on-device, not just flakily.
+# Installing Termux's own `rust` package sidesteps all of that: it's built
+# specifically to work as a native Termux-hosted toolchain (confirmed
+# current as of writing, version 1.97.1, via
+# raw.githubusercontent.com/termux/termux-packages/master/packages/rust/build.sh),
+# and once its `cargo`/`rustc` land on $PREFIX/bin -- already on PATH for
+# everything else in this script -- maturin's `shutil.which("cargo")` check
+# finds them and never enters the broken rustup bootstrap path at all. No
+# CARGO_HOME/RUSTUP_HOME exports needed: rustup is never invoked in this
+# path, and pip's own build-isolation code (confirmed by reading
+# pypa/pip's src/pip/_internal/build_env/{venv,virtual}.py) prepends its
+# ephemeral build venv's bin dir to PATH rather than replacing it, so the
+# rest of the inherited PATH -- including $PREFIX/bin -- still reaches the
+# isolated build subprocess. Termux's `rust` package declares its own deps
+# as clang, libandroid-execinfo, libc++, libllvm, lld, openssl, zlib, plus
+# a target-specific rust-std-<triple> package it appends to its own
+# DEPENDS at build time (not a literal static dependency name -- confirmed
+# by reading the actual conditional in its build.sh, not just the static
+# declaration at the top of the file). clang is already installed on the
+# line below; `pkg`/`apt` resolves the rest on its own regardless of how
+# it's assembled, so nothing else needs adding here.
+#
+# This same wall likely also catches `tokenizers` (HuggingFace's tokenizer
+# library, another transitive aider-chat dependency, seen resolving to
+# 0.22.2 in a real `pip install aider-chat --dry-run --report` run): PyPI
+# publishes manylinux/musllinux/macOS/Windows/PyPy wheels for 0.22.2 but
+# nothing that matches Termux's platform tag, and its own pyproject.toml
+# (confirmed at github.com/huggingface/tokenizers, tag v0.22.2,
+# bindings/python/pyproject.toml) declares the same `build-backend =
+# "maturin"`, `requires = ["maturin>=1.0,<2.0"]` as fastuuid -- so the fix
+# above should cover it too. Genuinely unverified past that point, on both
+# packages, without a real Termux/aarch64 device: having a working
+# rustc/cargo on PATH means the broken auto-bootstrap is skipped, but it
+# doesn't guarantee either crate's Rust code actually *compiles* cleanly
+# against Android's libc/linker (bionic) once a real compile is attempted --
+# that's a different question than "does a toolchain exist", and neither
+# this sandbox nor rustup's target list can answer it.
+pkg install -y git cmake golang clang make curl python rust
 
 echo "[3/6] Building llama.cpp (native, CPU-only)..."
 if [ ! -d "$LLAMA_DIR" ]; then
