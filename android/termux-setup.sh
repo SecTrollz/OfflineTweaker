@@ -271,6 +271,25 @@ pkg update -y
 # version as it did against pip 24.0 in this sandbox's throwaway venv.
 pkg install -y git cmake golang clang make curl python rust python-psutil
 
+# libjpeg-turbo/freetype/libpng/zlib: Pillow is another aider-chat
+# dependency (pulled in via aider's image handling) that has no wheel for
+# Termux's platform tag, so pip falls back to building it from source --
+# and that
+# build fails outright with "The headers or library files could not be
+# found for jpeg, a required dependency when compiling Pillow from
+# source", confirmed on a real device, because Termux ships none of
+# Pillow's image-codec dependencies by default. Unlike scipy, this isn't a
+# missing-toolchain problem Termux's maintainers have ruled out on-device
+# -- it just needs the codec libraries' headers present before Pillow's
+# setup.py runs. Installing them here is necessary but not sufficient on
+# its own: confirmed on a real device that a plain `pip install pillow`
+# after this line still fails the same way, and only succeeds once
+# INCLUDE/LDFLAGS are also set for the pip install step itself (see the
+# export right before step [6/6]'s installs, below) -- Pillow's
+# setup.py does its own header/library probing rather than relying on
+# pkg-config, and doesn't check $PREFIX/include unless told to.
+pkg install -y libjpeg-turbo freetype libpng zlib
+
 echo "[3/6] Building llama.cpp (native, CPU-only)..."
 if [ ! -d "$LLAMA_DIR" ]; then
   git clone --depth 1 https://github.com/ggml-org/llama.cpp "$LLAMA_DIR"
@@ -454,6 +473,20 @@ MAX_FEEDBACK_CHARS=$MAX_FEEDBACK_CHARS
 EOF
 
 echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher..."
+# INCLUDE/LDFLAGS for Pillow's from-source build: see the pkg install of
+# libjpeg-turbo/freetype/libpng/zlib in step [2/6] above for why these are
+# needed at all. Pillow's own setup.py does its own dependency probing
+# (not pkg-config) and doesn't look at $PREFIX/include unless told to, so
+# without this export its build fails even with the libraries already
+# installed -- confirmed on a real device: `pip install pillow` alone
+# still fails with the same missing-jpeg error after the pkg install
+# above, and only succeeds with these two variables set for that same
+# call. Scoped to this step (exported here, not earlier in the script)
+# because nothing before this point invokes pip, and LDFLAGS in
+# particular has no reason to leak into the cmake-driven llama.cpp build
+# in step [3/6].
+export INCLUDE="$PREFIX/include"
+export LDFLAGS=" -lm"
 # Do NOT `pip install --upgrade pip` here -- Termux's python-pip package
 # refuses that outright ("Installing pip is forbidden, this will break the
 # python-pip package (termux)"), deliberately, so pip stays in sync with
@@ -697,6 +730,43 @@ echo "[6/6] Installing Aider (terminal coding agent) and writing its launcher...
 # confirms scipy is genuinely absent afterward, same as hf-xet.
 # Net conclusion: exclude it, the same way as hf-xet -- not attempt the
 # on-device build Termux's own maintainers have already ruled out.
+#
+# tree-sitter-c-sharp: aider-chat 0.86.2 pins 0.23.1 bare -- confirmed by
+# reaching it via `pip install aider-chat --dry-run --report`, though not
+# independently confirmed by reading aider-chat's requires_dist directly
+# the way the hf-xet/scipy pins were.
+# PyPI ships no wheel for Termux's platform tag (same story as every
+# other package on this list), so pip falls back to its sdist, and that
+# build fails outright: "src/parser.c:1:10: fatal error:
+# 'tree_sitter/parser.h' file not found" -- confirmed on a real device.
+# Root cause confirmed directly, not guessed: downloaded the 0.23.1
+# sdist and inspected its contents -- it has no tree_sitter/ directory
+# at all, so the header genuinely isn't on the device anywhere, and no
+# CPATH/C_INCLUDE_PATH override can fix that (confirmed live: setting
+# C_INCLUDE_PATH to $PREFIX/include and re-running the same install
+# still fails identically, because $PREFIX/include has no parser.h
+# either -- no native `tree-sitter` package installed, confirmed via
+# `pkg list-installed`). An earlier working theory here -- that the
+# fix was a missing include-path override pointing at a separately
+# installed `tree-sitter` package -- was wrong and has been dropped.
+# The actual fix: downloaded the 0.23.5 sdist the same way and diffed
+# it against 0.23.1's -- 0.23.5 bundles its own copy of the header at
+# src/tree_sitter/{alloc,array,parser}.h, right next to parser.c/
+# scanner.c, which include it via a relative path, so it builds
+# standalone with no external tree-sitter headers needed at all.
+# Confirmed live: `pip install tree-sitter-c-sharp==0.23.5` (no env
+# overrides) succeeds outright on the same device where 0.23.1 fails.
+# Upstream evidently fixed an incomplete-sdist packaging bug somewhere
+# between those two releases; nothing about Termux specifically is at
+# fault here.
+# Because the fix is "use a newer version", not "exclude it", this
+# package is still stubbed below (so pip's resolution against
+# aider-chat's exact ==0.23.1 pin doesn't attempt the broken sdist at
+# all and never even reaches this build), but -- unlike hf-xet/scipy,
+# which are genuinely unneeded and left absent -- a working newer
+# release is then installed for real, explicitly, right after the
+# audioop-lts fix below (same guarded-by-`import` pattern, so re-runs
+# don't reinstall it once it's satisfied).
 AIDER_TMPDIR="$(mktemp -d)"
 # set -e means a failure partway through this block (a real pip error, not
 # the hf-xet workaround) skips straight past the cleanup at the bottom --
@@ -801,7 +871,13 @@ else:
 PYEOF
 
 echo "Checking aider-chat's own pinned versions of the packages known to be"
-echo "broken/unsupported to build on Termux (hf-xet, scipy)..."
+echo "broken/unsupported to build on Termux (hf-xet, scipy, tree-sitter-c-sharp)..."
+# tree-sitter-c-sharp is a special case among these three: hf-xet/scipy
+# are excluded outright because they're genuinely unneeded (see their
+# own writeups above), but tree-sitter-c-sharp's exact pinned version is
+# excluded only to stop pip attempting its broken sdist -- a working
+# newer version is installed for real further down, right after the
+# audioop-lts fix.
 # --force-reinstall is load-bearing here, confirmed by hitting the bug it
 # fixes: on a *second* run (aider-chat already installed and satisfying
 # ">=0.85"), a plain `--no-deps --dry-run --report` produces an install
@@ -829,6 +905,7 @@ pip install --ignore-requires-python --no-deps --dry-run --force-reinstall \
 declare -A EXCLUDED_PKG_STUB_NAME=(
   [hf-xet]=hf_xet
   [scipy]=scipy
+  [tree-sitter-c-sharp]=tree_sitter_c_sharp
 )
 
 mkdir -p "$AIDER_TMPDIR/stub"
@@ -945,6 +1022,30 @@ if ! python3 -c "import audioop" >/dev/null 2>&1; then
   echo "(an aider-chat dependency, imported unconditionally by aider itself)"
   echo "needs it -- installing the official backport."
   pip install --ignore-requires-python audioop-lts
+fi
+
+# tree-sitter-c-sharp: see the big comment above the AIDER_TMPDIR block
+# for the full story -- aider-chat's exact ==0.23.1 pin has an
+# incomplete sdist that can't build on Termux (or anywhere else without
+# the header it's missing), confirmed by inspecting that sdist directly,
+# and the stub exclusion above only stops that broken pin from being
+# installed for real; it doesn't install any working version. 0.23.5's
+# sdist bundles the header it's missing and was confirmed live to build
+# clean with no env overrides needed, so that's what's installed here
+# instead. Guarded on import, same pattern as audioop-lts just above,
+# so re-runs don't reinstall it once satisfied. Genuinely unverified:
+# whether grep-ast/tree-sitter-language-pack's C# support works
+# identically against 0.23.5 as it would have against the 0.23.1 they
+# actually pin -- both are 0.23.x point releases of an
+# auto-generated-bindings package, so a breaking API change between
+# them would be unusual, but this hasn't been exercised end-to-end
+# (opening an actual C# file in aider) on a real device.
+if ! python3 -c "import tree_sitter_c_sharp" >/dev/null 2>&1; then
+  echo "aider-chat pins a tree-sitter-c-sharp release whose sdist is"
+  echo "missing a bundled header and can't build on Termux -- installing"
+  echo "a newer release with the same (incomplete-sdist) bug already"
+  echo "fixed upstream instead."
+  pip install --ignore-requires-python --no-deps "tree-sitter-c-sharp>=0.23.5"
 fi
 
 cat > "$HOME/aider-local.sh" << EOF
