@@ -1,6 +1,65 @@
-# WORLD DOMINATION PLAN NO.63
+# OfflineTweaker
 
-## OfflineTweaker
+Local AI coding agent that runs on your laptop, phone, or cloud VM — fully
+offline by default, with optional cloud boosts when you need them.
+
+- **Desktop**: Dockerized environment with Ollama, Continue.dev, Aider, and Jupyter.
+- **Android**: Runs directly in Termux with native llama.cpp — no server, no Docker.
+- **Cloud**: SSH tunnel into a remote box or use third-party APIs (OpenRouter, Together, etc.) — you choose when to go online.
+
+## Quick Start
+
+### Desktop
+
+```bash
+git clone https://github.com/SecTrollz/OfflineTweaker.git
+cd OfflineTweaker
+./setup.sh
+docker compose up -d
+docker exec -it ollama ollama pull qwen2.5-coder:7b   # start small, or :14b for better quality
+```
+
+Then open `http://localhost:8080` (code-server — password printed once
+during setup, saved in `.env` if you missed it) or `http://localhost:3000`
+(Open WebUI chat). Full steps, including Continue's one-time extension
+install: see [Desktop (Docker)](#desktop-docker) below.
+
+### Android (Termux)
+
+```bash
+git clone https://github.com/SecTrollz/OfflineTweaker.git
+cd OfflineTweaker/android
+chmod +x termux-setup.sh
+./termux-setup.sh
+termux-wake-lock
+~/run-model.sh
+```
+
+Then open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or in a
+second Termux session run `~/aider-local.sh` or `./agent-loop.sh`. RAM is
+auto-detected and a matching model picked for you — override with
+`./termux-setup.sh --ram 8gb` if it picks wrong. Details: see
+[On-Device (Android / Termux)](#on-device-android--termux) below.
+
+## Features
+
+- **Autonomous build loop** — give it a task, it writes code, runs your
+  tests, reads the failures, and fixes itself, repeating until tests pass
+  or it hits a limit. See [Autonomous Build Loop](#autonomous-build-loop).
+- **Aider, Continue.dev, Jupyter** — pick whichever workflow fits how you
+  like to work.
+- **Cross-platform** — the same agent loop runs against Ollama on desktop
+  and native llama.cpp on Android.
+- **RAM-aware on Android** — auto-detects device RAM, picks a matching
+  model and context budget, no flags needed.
+- **Resumable, verified model downloads** — an interrupted download
+  resumes instead of restarting from scratch, and every file is
+  checksum-verified and locked read-only before anything trusts it.
+- **Optional log encryption** — encrypt the build loop's logs at rest with
+  [age](https://age-encryption.org), opt-in.
+- **Cloud bridge** — tunnel into a rented VM or use a hosted API when
+  local compute isn't enough, never silently. See [Cloud](#cloud).
+
 ## Desktop (Docker)
 Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
 Agent modes:
@@ -20,8 +79,10 @@ Tips:
 - For GPU: add NVIDIA section in compose
 - Image versions are pinned in `docker-compose.yml` (not `:latest`/`:main`)
   so an upstream push can't silently change a running stack. Override per
-  image by setting e.g. `OLLAMA_DOCKER_TAG=latest` in `.env`, then
-  `docker compose up -d` to apply.
+  image by setting e.g. `OLLAMA_DOCKER_TAG=latest` in `.env` if you want to
+  track upstream more closely — know that `latest` specifically reintroduces
+  the exact silent-break risk pinning avoids — then `docker compose up -d`
+  to apply.
 - Workspace: ./workspace (persisted forever)
 - Fully offline after model pull (unless you opt into [Cloud](#cloud))
 - Export to GitHub anytime
@@ -260,7 +321,10 @@ command above instead of opening the ports publicly.
 Any `agent/build-loop.sh` flag (`--test-cmd`, `--max-iters`, `--map-tokens`,
 `--max-feedback-chars`, ...) passes straight through.
 
+## License
+
+Apache-2.0 — free to use, modify, and redistribute. See [LICENSE](LICENSE).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
-
