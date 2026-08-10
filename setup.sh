@@ -17,7 +17,15 @@ if [ ! -f .env ]; then
 # overwrite this file on subsequent runs.
 CODE_SERVER_PASSWORD=$GENERATED_PASSWORD
 EOF
-  echo "code-server password: $GENERATED_PASSWORD (saved in .env, not committed to git)"
+  echo
+  echo "=============================================================="
+  echo " code-server password: $GENERATED_PASSWORD"
+  echo " Save this now (password manager, notes, wherever you keep"
+  echo " things) -- this is the only time it prints this prominently."
+  echo " It's also always sitting in plain text in ./.env if you lose"
+  echo " it (not committed to git, safe to grep any time)."
+  echo "=============================================================="
+  echo
 else
   echo ".env already exists, leaving your code-server password as-is."
 fi
@@ -182,12 +190,19 @@ else
   echo "workspace/setup_venv.py already exists, leaving it untouched."
 fi
 
+# Read the password back from .env regardless of whether this run just
+# generated it or it already existed -- so it shows up here either way,
+# right before the step that actually needs it, not just once at the
+# top where it's easy to scroll past.
+CURRENT_PASSWORD="$(grep -m1 '^CODE_SERVER_PASSWORD=' .env | cut -d= -f2-)"
+[ -z "$CURRENT_PASSWORD" ] && CURRENT_PASSWORD="(not set -- check .env)"
+
 echo "✅ All files created!"
 echo "Next steps:"
 echo "1. docker compose up -d"
 echo "2. docker exec -it ollama ollama pull qwen2.5-coder:7b   # (start small) or :14b for better quality"
 echo "3. docker exec -it ollama ollama pull nomic-embed-text   # (optional embedding)"
-echo "4. Open http://localhost:8080 (code-server, password in .env)"
+echo "4. Open http://localhost:8080 (code-server, password: $CURRENT_PASSWORD)"
 echo "5. In code-server terminal: cd /home/coder/workspace && python3 setup_venv.py"
 echo "6. Install Continue extension from VS Code marketplace (one-time)"
 echo "7. Open WebUI chat: http://localhost:3000"

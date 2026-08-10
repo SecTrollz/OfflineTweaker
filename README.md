@@ -30,8 +30,11 @@ docker compose up -d
 docker exec -it ollama ollama pull qwen2.5-coder:7b   # start small, upgrade later
 ```
 
-Open `http://localhost:8080` for code-server (password printed once, saved
-in `.env` if you forgot it) or `http://localhost:3000` for the Open WebUI
+Open `http://localhost:8080` for code-server. `setup.sh` prints the
+password once, then reprints it again at the end of the run so you're
+not stuck scrolling back for it, save it to a password manager or
+wherever you keep things, it's also always sitting in plain text in
+`.env` if you lose it. `http://localhost:3000` gets you the Open WebUI
 chat. Full walkthrough, including the Continue extension: see
 [Desktop (Docker)](#desktop-docker) below.
 
@@ -72,7 +75,7 @@ Agent modes:
 - Jupyter notebooks for when you want to be fancy.
 
 Tips:
-- `setup.sh` generates a random password into `.env`, printed once, never committed. Edit `.env` to change it, then `docker compose up -d`.
+- `setup.sh` generates a random password into `.env`, never committed. It prints once when generated and again at the end of the run, save it somewhere real, don't just trust your scrollback. Edit `.env` yourself anytime to change it, then `docker compose up -d`.
 - Ports bind to 127.0.0.1 by default, safe on shared boxes too. See [Cloud](#cloud) to expose them.
 - For GPU, add the NVIDIA section in compose.
 - Image versions are pinned, not `:latest`, so upstream breaks won't surprise you. Override with `OLLAMA_DOCKER_TAG=latest` in `.env` if you like living dangerously (that's exactly the risk pinning exists to avoid).
