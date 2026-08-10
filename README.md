@@ -2,12 +2,21 @@
   <img src="assets/logo.jpg" alt="OfflineTweaker" width="320">
 </p>
 
-Local AI coding agent that runs on your laptop, phone, or cloud VM — fully
-offline by default, with optional cloud boosts when you need them.
+You're not paying for this. I'm not paying for this. Nobody's paying for
+this. That's the whole point.
 
-- **Desktop**: Dockerized environment with Ollama, Continue.dev, Aider, and Jupyter.
-- **Android**: Runs directly in Termux with native llama.cpp — no server, no Docker.
-- **Cloud**: SSH tunnel into a remote box or use third-party APIs (OpenRouter, Together, etc.) — you choose when to go online.
+This is an offline AI coding agent that runs on your laptop, your phone,
+or a random VM you found in a datacenter. No API keys, no monthly fees,
+nobody's credit card on file. Download it, run it, fix your broken code
+anywhere with no signal.
+
+## What This Actually Is
+
+- **Desktop**: Dockerized environment with Ollama, Continue.dev, Aider, and Jupyter. The good stuff.
+- **Android**: Runs directly in Termux with native llama.cpp. No server, no Docker, no bullshit. Your phone is a coding assistant now.
+- **Cloud**: SSH tunnel into a remote box or use third-party APIs (OpenRouter, Together, etc). You choose when to go online. I'll judge you for it, but I get it, sometimes you need a bigger hammer.
+
+If you're still paying for AI, you're doing it wrong.
 
 ## Quick Start
 
@@ -18,13 +27,13 @@ git clone https://github.com/SecTrollz/OfflineTweaker.git
 cd OfflineTweaker
 ./setup.sh
 docker compose up -d
-docker exec -it ollama ollama pull qwen2.5-coder:7b   # start small, or :14b for better quality
+docker exec -it ollama ollama pull qwen2.5-coder:7b   # start small, upgrade later
 ```
 
-Then open `http://localhost:8080` (code-server — password printed once
-during setup, saved in `.env` if you missed it) or `http://localhost:3000`
-(Open WebUI chat). Full steps, including Continue's one-time extension
-install: see [Desktop (Docker)](#desktop-docker) below.
+Open `http://localhost:8080` for code-server (password printed once, saved
+in `.env` if you forgot it) or `http://localhost:3000` for the Open WebUI
+chat. Full walkthrough, including the Continue extension: see
+[Desktop (Docker)](#desktop-docker) below.
 
 ### Android (Termux)
 
@@ -37,69 +46,49 @@ termux-wake-lock
 ~/run-model.sh
 ```
 
-Then open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or in a
-second Termux session run `~/aider-local.sh` or `./agent-loop.sh`. RAM is
-auto-detected and a matching model picked for you — override with
-`./termux-setup.sh --ram 8gb` if it picks wrong. Details: see
+Open `http://127.0.0.1:8080` in Chrome, or in a second Termux session run
+`~/aider-local.sh` or `./agent-loop.sh`. RAM gets auto-detected, override
+with `--ram 8gb` if it guesses wrong. More detail: see
 [On-Device (Android / Termux)](#on-device-android--termux) below.
 
 ## Features
 
-- **Autonomous build loop** — give it a task, it writes code, runs your
-  tests, reads the failures, and fixes itself, repeating until tests pass
-  or it hits a limit. See [Autonomous Build Loop](#autonomous-build-loop).
-- **Aider, Continue.dev, Jupyter** — pick whichever workflow fits how you
-  like to work.
-- **Cross-platform** — the same agent loop runs against Ollama on desktop
-  and native llama.cpp on Android.
-- **RAM-aware on Android** — auto-detects device RAM, picks a matching
-  model and context budget, no flags needed.
-- **Resumable, verified model downloads** — an interrupted download
-  resumes instead of restarting from scratch, and every file is
-  checksum-verified and locked read-only before anything trusts it.
-- **Optional log encryption** — encrypt the build loop's logs at rest with
-  [age](https://age-encryption.org), opt-in.
-- **Cloud bridge** — tunnel into a rented VM or use a hosted API when
-  local compute isn't enough, never silently. See [Cloud](#cloud).
+- **Autonomous build loop.** Give it a task, it writes code, runs your tests, reads the failures, fixes itself, repeats until the tests pass or it gives up. Like a junior dev who doesn't complain. See [Autonomous Build Loop](#autonomous-build-loop).
+- **Aider, Continue.dev, Jupyter.** Pick your poison. I don't care what you use, just ship code.
+- **Cross platform.** Same agent loop runs on desktop (Ollama) and Android (llama.cpp). Rewriting things twice is for people with chargeback money.
+- **RAM aware on Android.** Auto detects device RAM, picks a matching model and context budget. No flags needed. You're welcome.
+- **Resumable, verified model downloads.** Interrupted downloads resume, get checksum verified, then get locked read only. I've been burned by corrupted downloads mid flight. Never again.
+- **Optional log encryption.** Encrypt logs with age if you're paranoid. I'm not, but you might be.
+- **Cloud bridge.** Tunnel into a rented VM or use a hosted API when local compute isn't enough. It warns you every time. No sneaky cloud charges. See [Cloud](#cloud).
 
 ## Desktop (Docker)
-Models: Qwen2.5-Coder series (desktop) / DeepSeek-R1 distills (on-device)
+
+Models: Qwen2.5-Coder on desktop, DeepSeek-R1 distills on Android.
+
 Agent modes:
-- **Autonomous build loop** (`agent/build-loop.sh`): give it a task, it
-  writes code, runs your tests, reads the failures, and fixes it itself —
-  see [Autonomous Build Loop](#autonomous-build-loop) below.
-- Continue.dev in VS Code: /edit, /run, codebase chat, autonomous refactoring
-- Aider: `aider --model ollama/qwen2.5-coder:14b` in terminal
-- Jupyter notebooks for scripts/REPL
+- **Autonomous build loop** (`agent/build-loop.sh`): the main event. See [Autonomous Build Loop](#autonomous-build-loop) below.
+- Continue.dev in VS Code: /edit, /run, refactoring.
+- Aider: `aider --model ollama/qwen2.5-coder:14b` in the terminal.
+- Jupyter notebooks for when you want to be fancy.
 
 Tips:
-- `setup.sh` generates a random code-server password into `.env` on first
-  run (printed once, never committed) and won't touch it again on re-runs —
-  edit `.env` yourself to change it, then `docker compose up -d` to apply.
-- Ports bind to 127.0.0.1 by default (safe on a shared/cloud box too) — see
-  [Cloud](#cloud) for how to reach them from another device
-- For GPU: add NVIDIA section in compose
-- Image versions are pinned in `docker-compose.yml` (not `:latest`/`:main`)
-  so an upstream push can't silently change a running stack. Override per
-  image by setting e.g. `OLLAMA_DOCKER_TAG=latest` in `.env` if you want to
-  track upstream more closely — know that `latest` specifically reintroduces
-  the exact silent-break risk pinning avoids — then `docker compose up -d`
-  to apply.
-- Workspace: ./workspace (persisted forever)
-- Fully offline after model pull (unless you opt into [Cloud](#cloud))
-- Export to GitHub anytime
-- `docker-compose.yml`, `.env`, and a few other files are generated by
-  `setup.sh` on first run and gitignored — see
-  [Advanced: generated files and mount paths](#desktop-generated-files-and-mount-paths)
-  if you want to customize the defaults or know where they need to live.
+- `setup.sh` generates a random password into `.env`, printed once, never committed. Edit `.env` to change it, then `docker compose up -d`.
+- Ports bind to 127.0.0.1 by default, safe on shared boxes too. See [Cloud](#cloud) to expose them.
+- For GPU, add the NVIDIA section in compose.
+- Image versions are pinned, not `:latest`, so upstream breaks won't surprise you. Override with `OLLAMA_DOCKER_TAG=latest` in `.env` if you like living dangerously (that's exactly the risk pinning exists to avoid).
+- Workspace: `./workspace`, persisted forever.
+- Fully offline after the model pull, unless you go [Cloud](#cloud).
+- Export to GitHub anytime, even offline code needs to be shared with the world eventually.
+
+Generated files live in `./workspace` and `./continue-config`, they need
+to be there or nothing works. Details in
+[Advanced](#desktop-generated-files-and-mount-paths) if you're curious.
 
 ## On-Device (Android / Termux)
 
-For running fully offline directly on a phone (no server, no Docker) via
-Termux + native llama.cpp.
-**Works on any Termux-capable Android phone** — RAM is auto-detected (via
-`/proc/meminfo`) and bucketed into a tier, no need to know a specific
-device's name:
+Fully offline, no server, no Docker, just Termux and llama.cpp. Works on
+any Termux capable Android phone. RAM auto-detected via `/proc/meminfo`
+and bucketed into a tier. No need to know your phone's name.
 
 ```bash
 git clone https://GitHub.com/SecTrollz/OfflineTweaker.git
@@ -113,16 +102,12 @@ termux-wake-lock
 (Setting up the Docker desktop stack instead? See [Desktop (Docker)](#desktop-docker) above for `./setup.sh`.)
 
 Then either:
-- open `http://127.0.0.1:8080` in Chrome for a built-in chat UI, or
-- in a second Termux session, run `~/aider-local.sh` inside a project
-  directory for a manual agentic coding CLI, or `./agent-loop.sh` for the
-  [autonomous build loop](#autonomous-build-loop) — both use the same local
-  model, no cloud API key needed.
+- open `http://127.0.0.1:8080` in Chrome for a chat UI, or
+- in a second Termux session, run `~/aider-local.sh` inside a project directory, or `./agent-loop.sh` for the [autonomous build loop](#autonomous-build-loop). Both use the same local model, no cloud keys needed.
 
-`termux-setup.sh` ends with a summary that's worth actually reading, not
-just scrolling past — it's your confirmation the auto-detect picked what
-you expected, and the exact commands above with your real values filled
-in:
+`termux-setup.sh` ends with a summary that actually matters, not
+boilerplate. It's your confirmation the auto-detect picked what you
+expected:
 
 ```
 Done. Recommended next steps:
@@ -139,237 +124,182 @@ Context: 4096 tokens | Threads: 8
 Profile saved to: /data/data/com.termux/files/home/.offlinetweaker/profile.env
 ```
 
-The `Model`/`Context`/`Threads` line is your RAM tier's auto-detect result
-printed back at you — glance at it to confirm it picked the tier you
-expected (force a different one with `--ram`, see the table below, if
-not). The `Profile saved to` path is that same choice written to disk —
-`android/agent-loop.sh` reads it automatically, so nothing past this
-point needs re-typing which model or tier you're on.
+Check the `Model`/`Context`/`Threads` line to confirm it picked the tier
+you expected (force a different one with `--ram`, see the table below).
+`Profile saved to` is that same choice written to disk, `agent-loop.sh`
+reads it automatically so you never have to re-type which model you're on.
 
 Model picked per RAM tier:
 
-| Tier  | Typical device RAM | Model                          | Quant   | Size    |
-|-------|---------------------|---------------------------------|---------|---------|
-| 3gb   | ~3GB                | DeepSeek-R1-Distill-Qwen-1.5B   | Q4_K_M  | ~1.1GB  |
-| 4gb   | ~4GB (e.g. Moto G 5G) | DeepSeek-R1-Distill-Qwen-1.5B | Q4_K_M  | ~1.1GB  |
-| 6gb   | ~6GB                | DeepSeek-R1-Distill-Qwen-1.5B   | Q4_K_M  | ~1.1GB  |
-| 8gb   | ~8GB (e.g. Pixel 9a) | DeepSeek-R1-Distill-Qwen-7B    | Q4_K_M  | ~4.4GB  |
-| 12gb  | ~12GB               | DeepSeek-R1-Distill-Llama-8B    | Q4_K_M  | ~4.9GB  |
-| 16gb  | 16GB+                | DeepSeek-R1-Distill-Qwen-14B   | Q4_K_M  | ~8.4GB  |
+| Tier | Typical RAM | Model | Size |
+|------|-------------|-------|------|
+| 3gb  | ~3GB  | DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M) | ~1.1GB |
+| 4gb  | ~4GB (e.g. Moto G 5G) | DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M) | ~1.1GB |
+| 6gb  | ~6GB  | DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M) | ~1.1GB |
+| 8gb  | ~8GB (e.g. Pixel 9a) | DeepSeek-R1-Distill-Qwen-7B (Q4_K_M) | ~4.4GB |
+| 12gb | ~12GB | DeepSeek-R1-Distill-Llama-8B (Q4_K_M) | ~4.9GB |
+| 16gb | 16GB+ | DeepSeek-R1-Distill-Qwen-14B (Q4_K_M) | ~8.4GB |
 
-Same model at the 3/4/6GB tiers on purpose — DeepSeek only ships a 1.5B or a
-7B+ distill, nothing in between, so the extra headroom on a 6GB phone goes
-into a bigger context window instead. Force a specific tier with
-`./termux-setup.sh --ram 8gb` if auto-detection picks wrong, or use the
+Same model at 3/4/6GB tiers because DeepSeek only ships a 1.5B or a 7B+,
+nothing in between. The extra headroom on a 6GB phone just buys more
+context. Override with `--ram 8gb` if it guesses wrong, or use the
 legacy aliases `./setup.sh pixel9a` / `motog5g`.
 
-**Coding lane (`--role coding`, experimental).** The default model above
-is a DeepSeek-R1 *reasoning* distill — good at diagnosing why something's
-broken, at the cost of `<think>` traces that eat into the small context
-budget these tiers have to work with. `--role coding` swaps in a
-code-tuned model instead, no reasoning overhead:
-
-| Tier | Model | Quant | License |
-|------|-------|-------|---------|
-| 3gb / 4gb / 6gb | Qwen2.5-Coder-1.5B-Instruct | Q4_K_M | Apache 2.0 |
+**Coding lane, `--role coding`, still experimental.** The default models
+are reasoning distills, good at diagnosis but they burn tokens on
+`<think>` traces. `--role coding` swaps in a code tuned model instead,
+Qwen2.5-Coder-1.5B-Instruct, Apache 2.0, on the lower tiers. No reasoning
+overhead.
 
 ```bash
 ./termux-setup.sh --ram 6gb --role coding
 ```
 
-Only available on the 3gb/4gb/6gb tiers right now — `--role coding` on
-8gb/12gb/16gb errors out cleanly rather than silently falling back, since
-there isn't a vetted code-tuned candidate at those sizes yet. This lane
-is newer than the reasoning one and hasn't had the same real-device
-mileage — if it breaks, that's useful to know, same as any other `--ram`
-tier bug reported here.
+Only works on 3/4/6GB tiers right now. Higher tiers error out cleanly
+instead of silently falling back, since there's no vetted coding model
+at those sizes yet. This is newer than the reasoning lane, report bugs
+if you hit any.
 
 Notes:
-- Run `termux-setup-storage` (the setup script does this for you) so the
-  model file survives Termux updates.
-- `termux-wake-lock` prevents Android from suspending inference mid-response.
-- All tiers use DeepSeek-R1 reasoning distills, so expect `<think>` traces
-  in output — trim them client-side if you just want the final answer.
-- The chosen tier/model is saved to `~/.offlinetweaker/profile.env`, which
-  `android/agent-loop.sh` reads automatically — re-run `termux-setup.sh`
-  with a different `--ram` to switch tiers later.
-- If the model download gets interrupted (dropped connection, Termux
-  killed in the background, phone locked mid-transfer), re-running
-  `termux-setup.sh` resumes from wherever it left off instead of
-  re-downloading the whole multi-GB file from scratch. The partial file
-  still goes through the same checksum verification as a full download
-  before it's trusted, so a resumed download is exactly as safe as a
-  fresh one.
-- After a model file passes checksum verification it's locked read-only
-  (`chmod 444`, plus a best-effort `chattr +i` where the device allows it)
-  so nothing can silently modify it afterward. To force a full re-download
-  from scratch (switching tiers, suspected corruption, etc. — as opposed
-  to resuming), remove it explicitly first:
-  `chattr -i ~/models/*.gguf 2>/dev/null; rm -f ~/models/*.gguf*`
-  (the `chattr -i` is only load-bearing if you're on a rooted device where
-  it actually took effect — harmless no-op otherwise; the glob covers the
-  partial-download file too, if one exists) — then re-run
-  `termux-setup.sh`.
+- `termux-setup-storage` runs automatically, the model survives Termux updates.
+- `termux-wake-lock` keeps Android from sleeping mid inference.
+- Expect `<think>` traces on the reasoning lane. Trim them client side, or just use `--role coding` above to skip them.
+- Profile saved to `~/.offlinetweaker/profile.env`, agent scripts read it automatically.
+- Interrupted downloads resume. Partial files get checksum verified before use, same as a fresh download.
+- Model files are locked read only (`chmod 444`, best effort `chattr +i`), nothing modifies them. To force a re-download, remove it yourself: `chattr -i ~/models/*.gguf 2>/dev/null; rm -f ~/models/*.gguf*`.
 
 ## Autonomous Build Loop
 
-A thin wrapper around [Aider](https://aider.chat)'s own edit loop that
-turns it from something you babysit into something you can walk away
-from: give it a task, it writes code with Aider, **runs your
-`--test-cmd`, feeds Aider the failure output, and repeats** until the
-tests pass or it runs out of attempts — the same idea behind Replit
-Agent / Emergent, just built on Aider instead of from scratch. Fully
-offline, on top of whichever local model you're already running.
+A thin wrapper around [Aider](https://aider.chat) that makes it set and
+forget. Give it a task, it edits the code, runs your test command, feeds
+the failures back, repeats until the tests pass or it hits a limit.
 
 ```bash
-# Desktop, against the Ollama server from setup.sh:
+# Desktop
 ./agent/build-loop.sh --dir ./workspace/my-app \
-  --task "Add a /health endpoint that returns 200 OK" \
+  --task "Add a /health endpoint" \
   --model qwen2.5-coder:14b --api-base http://localhost:11434/v1 \
   --test-cmd "pytest -q"
 
-# Android, against the on-device model (run-model.sh must already be running).
-# No profile flag needed -- it reads whatever termux-setup.sh set up:
+# Android, profile is read automatically
 cd android
 ./agent-loop.sh --dir ~/projects/my-app \
-  --task "Fix the failing tests" --test-cmd "python -m pytest -q"
+  --task "Fix failing tests" --test-cmd "python -m pytest -q"
 ```
 
 How it works:
-1. Every run gets a short built-in system preamble telling the model to
-   stay terse — make the minimal change, don't restate unchanged code, keep
-   reasoning brief. Override it with the `OFFLINETWEAKER_SYSTEM_PROMPT` env
-   var if you want different behavior.
-2. Aider gets the task (preamble + your `--task`) and edits the project in
-   `--dir`.
-3. Your `--test-cmd` runs against the result.
-4. On failure, the last `--max-feedback-chars` of test output (default
-   4000) are fed back to the model as the next instruction ("fix the code
-   so this passes").
-5. Repeats up to `--max-iters` (default 5).
-6. Every iteration's transcript and test output is logged under
-   `<project-dir>/.offlinetweaker/agent-logs/<timestamp>/` so you can see
-   exactly what it tried, even on failure.
+- A short built-in system preamble keeps responses terse. Override it with `OFFLINETWEAKER_SYSTEM_PROMPT`.
+- Aider edits the code in `--dir`.
+- `--test-cmd` runs.
+- On failure, the last `--max-feedback-chars` of output gets fed back.
+- Repeats up to `--max-iters` (default 5).
+- Every run gets logged under `<project-dir>/.offlinetweaker/agent-logs/<timestamp>/`.
 
-Omit `--test-cmd` for a single-pass edit with no verification loop (useful
-for tasks with no obvious pass/fail check, like "add a README").
+Skip `--test-cmd` for a one shot edit with no verification loop.
 
-**Encrypting the logs.** Every iteration's task/response transcript and
-test output lands in `.offlinetweaker/agent-logs/` as plaintext by
-default. Encrypt it at rest with `--encrypt-logs <age-recipient-or-keyfile>`
-— one-time `age-keygen` setup, then it's automatic on every run. See
-[Advanced: encrypting agent logs](#encrypting-agent-logs) for the full walkthrough and
-why it's asymmetric (recipient-key) `age` rather than a passphrase.
+**Encrypting logs, optional.** Use
+`--encrypt-logs <age-recipient-or-keyfile>`, one time `age-keygen` setup
+and it's automatic after that. Full details in
+[Advanced](#encrypting-agent-logs).
 
-**Context budget matters on small local models.** A verbose response plus
-Aider's repo map plus a large failure dump can eat a small context window
-before the model even sees the code. Two flags tune that:
-- `--max-feedback-chars N` — how much test-failure output gets fed back on
-  retry.
-- `--map-tokens N` — forwarded to Aider's own repo-map budget.
+**Context tuning.** Small models need trimming. Two flags handle it:
+- `--max-feedback-chars N`, how much test output gets fed back on retry.
+- `--map-tokens N`, Aider's repo map budget.
 
-`android/agent-loop.sh` sets both automatically from the saved tier profile
-so the context window isn't blown by overhead before the actual fix gets
-written:
+Android sets both automatically per tier:
 
-| Tier  | Context | `--map-tokens` | `--max-feedback-chars` |
-|-------|---------|----------------|--------------------------|
-| 3gb   | 1536    | 0 (disabled)   | 900                      |
-| 4gb   | 2048    | 0 (disabled)   | 1200                     |
-| 6gb   | 3072    | 256            | 2000                     |
-| 8gb   | 4096    | 512            | 3000                     |
-| 12gb  | 6144    | 768            | 3500                     |
-| 16gb  | 8192    | 1024           | 4000                     |
+| Tier | Context | `--map-tokens` | `--max-feedback-chars` |
+|------|---------|-----------------|--------------------------|
+| 3gb  | 1536    | 0 (disabled)    | 900  |
+| 4gb  | 2048    | 0 (disabled)    | 1200 |
+| 6gb  | 3072    | 256             | 2000 |
+| 8gb  | 4096    | 512             | 3000 |
+| 12gb | 6144    | 768             | 3500 |
+| 16gb | 8192    | 1024            | 4000 |
 
-Leave both unset on desktop (as in the example above) to use Aider's normal
-defaults — a full-size context window doesn't need the trim.
+Desktop just uses Aider's own defaults, full context doesn't need the trim.
 
 ## Cloud
 
-Local hardware not enough for a task? Point the same build loop at a bigger
-model somewhere else — either a server you rent, or a third-party hosted
-API. Both go through `cloud/agent-loop.sh`:
+Need more power? Point the loop at a bigger model somewhere else, either
+your own rented VM or a third party API. Both go through
+`cloud/agent-loop.sh`:
 
 ```bash
-# Your own rented VM (VPS / cloud GPU box) running setup.sh's stack.
-# Opens a private SSH tunnel by default the VM's ports are bound to
-# 127.0.0.1 only (see setup.sh), so this is the only way in:
+# Your own VM, SSH tunnel by default
 ./cloud/agent-loop.sh --host user@1.2.3.4 --model qwen2.5-coder:14b \
-  --dir ./myproj --task "Add input validation" --test-cmd "pytest -q"
+  --dir ./myproj --task "Add validation" --test-cmd "pytest -q"
 
-# Same, but VM is already on a private network (e.g. Tailscale) --
-# skip the tunnel and connect directly:
+# VM already on a private network (Tailscale), skip the tunnel
 ./cloud/agent-loop.sh --host 100.x.y.z --no-tunnel \
   --model qwen2.5-coder:14b --dir ./myproj --task "..."
 
-# Third-party hosted API (OpenRouter/Together/Groq/Fireworks/custom).
-# This leaves the machine -- not offline -- and the script warns every time.
-# Export the key rather than passing --api-key -- a key on the command line
-# is visible to other users via `ps` and gets saved in shell history:
+# Third party API (OpenRouter, Together, etc), leaves the machine,
+# not offline anymore, the script warns every time.
+# Export the key instead of passing it on the command line,
+# it shows up in `ps` and shell history otherwise:
 export OPENAI_API_KEY="$OPENROUTER_API_KEY"
 ./cloud/agent-loop.sh --provider openrouter \
   --model deepseek/deepseek-r1 --dir ./myproj --task "..."
 ```
 
-Setup for the "your own VM" path is the same `setup.sh` used on desktop —
-run it on the rented box, then connect from your phone or laptop with the
-command above instead of opening the ports publicly.
-
-Any `agent/build-loop.sh` flag (`--test-cmd`, `--max-iters`, `--map-tokens`,
-`--max-feedback-chars`, ...) passes straight through.
+The "your own VM" path uses the same `setup.sh` as desktop. Run it on the
+rented box, then connect with the command above instead of opening ports
+to the public internet. Every `agent/build-loop.sh` flag passes straight
+through.
 
 ## Advanced
 
-Detail most people won't need day-to-day, split out here so the sections
-above stay skimmable.
+Stuff you probably don't need day to day, but it's here if you do.
 
 ### Desktop generated files and mount paths
 
 `docker-compose.yml`, `.env`, `workspace/requirements.txt`,
-`workspace/setup_venv.py`, and `continue-config/config.json` are generated
-by `setup.sh` and gitignored — edit `setup.sh` if you want the generated
-defaults to change, or edit the generated files directly for a local-only
-tweak (re-running `setup.sh` won't overwrite files that already exist).
-The last three live inside the directories docker-compose mounts into
-code-server (`./workspace` → `/home/coder/workspace`, `./continue-config`
-→ `/home/coder/.continue`) — that placement is required, not cosmetic, or
-code-server/Continue never see them.
+`workspace/setup_venv.py`, `continue-config/config.json`. All generated
+by `setup.sh` and gitignored. Edit `setup.sh` if you want the defaults to
+change, or edit the generated files directly for a one off tweak
+(re-running `setup.sh` won't overwrite them). The last three have to live
+inside the folders docker-compose mounts into code-server
+(`./workspace` maps to `/home/coder/workspace`, `./continue-config` maps
+to `/home/coder/.continue`). That placement isn't cosmetic, code-server
+and Continue just won't see them otherwise.
 
 ### Encrypting agent logs
 
-Every iteration's task/response transcript and test output from the
-[Autonomous Build Loop](#autonomous-build-loop) lands in
-`.offlinetweaker/agent-logs/` as plaintext by default. To encrypt it at
-rest, using [age](https://age-encryption.org) (one-time setup, then it's
-automatic):
+By default, [Autonomous Build Loop](#autonomous-build-loop) logs are
+plaintext. To encrypt with [age](https://age-encryption.org):
 
 ```bash
-age-keygen -o ~/.offlinetweaker/logs-key.txt   # prints an age1... public key
+age-keygen -o ~/.offlinetweaker/logs-key.txt
 ./agent/build-loop.sh --dir ./myproj --task "..." --model ... --api-base ... \
   --encrypt-logs age1yourpublickeyhere...
-# or pass the key FILE instead of the raw key text -- either works:
+# or pass the key file instead of the raw key text:
 --encrypt-logs ~/.offlinetweaker/logs-key.txt
 ```
 
-Every log this run produces (including Aider's own chat-history file) is
-encrypted to that key and the plaintext is deleted, no prompt needed per
-file. Decrypt later with:
+Every log the run produces, including Aider's own chat history, gets
+encrypted to that key and the plaintext gets deleted. Decrypt with:
 
 ```bash
 age -d -i ~/.offlinetweaker/logs-key.txt iteration-1.log.age
 ```
 
-`~/.offlinetweaker/logs-key.txt` is the only thing that can decrypt these
-— guard it like a password (`age-keygen` already sets it `chmod 600`).
-This is asymmetric (recipient-key) encryption on purpose, not a
-passphrase: a passphrase would mean re-typing it at every file write,
-which doesn't work for an unattended loop — age's own passphrase mode
-refuses to run non-interactively for exactly that reason.
+That key file is the only thing that can decrypt these, guard it like a
+password (`age-keygen` already sets it `chmod 600`). This uses asymmetric
+encryption on purpose, not a passphrase. A passphrase means re-typing it
+on every file write, which doesn't work for an unattended loop, and
+age's own passphrase mode refuses to run non-interactively anyway.
 
 ## License
 
-Apache-2.0 — free to use, modify, and redistribute. See [LICENSE](LICENSE).
+Apache 2.0. Use it, modify it, sell it, I don't care. Just don't ask me
+for support. See [LICENSE](LICENSE).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). If you break it, you bought it.
+If you fix it, you're a hero. I don't care either way.
+
+---
+
+Built with real hardware, too much caffeine, and no subscription in sight.
