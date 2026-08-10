@@ -521,11 +521,35 @@ else
 fi
 
 echo "[5/6] Writing server launcher and saved profile..."
+# Real device report: termux-wake-lock only stops the CPU from sleeping,
+# it does NOT stop Android's low-memory killer from closing Termux
+# outright if the system is low on RAM when llama-server tries to load a
+# multi-GB model -- confirmed as an actual failure mode, not a
+# hypothetical one (RAM-tier auto-detect buckets on MemTotal at setup
+# time, which can be a lot higher than what's actually free later, once
+# other apps/background services are using the phone). MODEL_SIZE_MB
+# baked in here from the real downloaded file, not guessed.
+MODEL_SIZE_MB=$(( $(wc -c < "$MODEL_PATH") / 1024 / 1024 ))
 cat > "$HOME/run-model.sh" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 # Launches $MODEL_LABEL as a local OpenAI-compatible server.
 # Keep Termux in the foreground (or run 'termux-wake-lock' first) so
 # Android doesn't kill the process mid-inference.
+#
+# Pre-flight memory check, warns rather than blocks: this is a rough
+# estimate (actual usage also depends on KV cache size, which varies by
+# model architecture and isn't computed here), not an exact prediction,
+# so a false alarm shouldn't stop a run that would've been fine.
+MODEL_SIZE_MB=$MODEL_SIZE_MB
+AVAILABLE_MB="\$(awk '/MemAvailable/ {print int(\$2/1024)}' /proc/meminfo)"
+NEEDED_MB=\$(( MODEL_SIZE_MB * 12 / 10 + 300 ))
+if [ -n "\$AVAILABLE_MB" ] && [ "\$AVAILABLE_MB" -lt "\$NEEDED_MB" ]; then
+  echo "Warning: only \${AVAILABLE_MB}MB free, this model probably needs" >&2
+  echo "around \${NEEDED_MB}MB. Android may kill Termux mid-run if it" >&2
+  echo "doesn't fit -- close some background apps, or re-run" >&2
+  echo "termux-setup.sh with a smaller --ram tier if this keeps happening." >&2
+  echo >&2
+fi
 exec "$LLAMA_DIR/build/bin/llama-server" \\
   -m "$MODELS_DIR/$MODEL_FILE" \\
   -c $CTX_SIZE \\

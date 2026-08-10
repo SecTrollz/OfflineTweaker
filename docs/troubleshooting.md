@@ -1,9 +1,10 @@
 # Troubleshooting
 
-Real errors real devices hit while running `android/termux-setup.sh`,
-what caused them, and how they got fixed. All of these are already
-handled in the current script. If you hit one of these on a fresh
-`git clone`, you're probably running a stale copy, `git pull` first.
+Real errors real devices hit running `android/termux-setup.sh` or
+`~/run-model.sh`, what caused them, and how they got fixed. All of
+these are already handled in the current script. If you hit one of
+these on a fresh `git clone`, you're probably running a stale copy,
+`git pull` first.
 
 If you hit something not on this list, open an issue with the exact
 error text. That's how everything below got fixed in the first place.
@@ -112,3 +113,34 @@ llama.cpp's own build derives a UI asset version from `git rev-list
 --count HEAD`, which returns a bogus value on the shallow `--depth 1`
 clone this script uses. Fixed by exporting `HF_UI_VERSION=latest`
 before configuring the build.
+
+## Termux just closes when you run `~/run-model.sh`
+
+User-reported: on a 6-8GB phone with the RAM tier auto-detected, no
+manual `--ram` override, `run-model.sh` would run and then Termux would
+close on its own, no crash log, no error, the rest of the phone kept
+working fine.
+
+Root cause: `termux-wake-lock` (which the quickstart already tells you
+to run first) only stops the CPU from sleeping. It does nothing to stop
+Android's low-memory killer from closing Termux outright if the system
+is genuinely low on RAM when `llama-server` tries to load a multi-GB
+model. The RAM tier gets picked once, at `termux-setup.sh` time, based
+on total device RAM (`MemTotal`), not on how much is actually free at
+the moment you later run `run-model.sh`, potentially much later, after
+other apps have been opened. A phone with enough total RAM for the
+picked tier can still not have enough *free* RAM right now.
+
+Fixed: `run-model.sh` now checks `MemAvailable` from `/proc/meminfo`
+against the model file's actual size before launching `llama-server`,
+and prints a warning to the terminal if it looks tight, rather than
+silently trying and getting killed with no explanation. This is a
+warning, not a hard block, since it's an estimate (it doesn't know the
+exact KV cache size for every model architecture), not a guaranteed
+prediction.
+
+If you see that warning, or Termux still closes without it firing
+(a large enough safety margin can still be wrong for your specific
+model/context combination): close background apps to free RAM, or
+re-run `termux-setup.sh --ram <a smaller tier>` to switch to a model
+that fits more comfortably.
