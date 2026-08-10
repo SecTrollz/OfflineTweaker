@@ -8,10 +8,26 @@
 # android/agent-loop.sh reads automatically.
 #
 # Usage:
-#   ./termux-setup.sh              # auto-detect RAM, pick the best tier
-#   ./termux-setup.sh --ram 8gb    # force a specific tier
-#   ./termux-setup.sh pixel9a      # legacy alias -> 8gb tier
-#   ./termux-setup.sh motog5g      # legacy alias -> 4gb tier
+#   ./termux-setup.sh                     # auto-detect RAM, pick the best tier
+#   ./termux-setup.sh --ram 8gb           # force a specific tier
+#   ./termux-setup.sh --role coding       # code-tuned model instead of the
+#                                          # default reasoning distill (only
+#                                          # available on the 3gb/4gb/6gb
+#                                          # tiers right now -- see below)
+#   ./termux-setup.sh --ram 6gb --role coding
+#   ./termux-setup.sh pixel9a             # legacy alias -> 8gb tier
+#   ./termux-setup.sh motog5g             # legacy alias -> 4gb tier
+#
+# --role reasoning (the default) picks a DeepSeek-R1 distill -- strong at
+# diagnosing tricky bugs and explaining *why* something's broken, at the
+# cost of `<think>` reasoning traces that eat into the small context
+# budget these devices have to work with.
+# --role coding picks a Qwen2.5-Coder-Instruct model instead -- tuned
+# specifically for writing/editing code rather than open-ended reasoning,
+# no `<think>` overhead, same family already used on desktop. It's newer
+# to this script than the reasoning lane and hasn't had the same amount
+# of real-device mileage yet -- report back if `--role coding` breaks
+# anything, the same way past `--ram` tier bugs got fixed here.
 #
 # Run inside Termux (F-Droid build, not the stale Play Store one):
 # https://f-droid.org/packages/com.termux/
@@ -19,14 +35,37 @@
 set -e
 
 RAM_ARG=""
-case "${1:-}" in
-  --ram) RAM_ARG="${2:-}" ;;
-  pixel9a) RAM_ARG="8gb" ;;   # legacy alias
-  motog5g) RAM_ARG="4gb" ;;   # legacy alias
-  "") RAM_ARG="" ;;           # auto-detect
+ROLE="reasoning"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ram)
+      RAM_ARG="${2:-}"
+      shift 2
+      ;;
+    --role)
+      ROLE="${2:-}"
+      shift 2
+      ;;
+    pixel9a)   # legacy alias
+      RAM_ARG="8gb"
+      shift
+      ;;
+    motog5g)   # legacy alias
+      RAM_ARG="4gb"
+      shift
+      ;;
+    *)
+      echo "Usage: $0 [--ram <3gb|4gb|6gb|8gb|12gb|16gb>] [--role <reasoning|coding>] [pixel9a|motog5g]"
+      echo "Run with no arguments to auto-detect RAM and pick a tier."
+      exit 1
+      ;;
+  esac
+done
+
+case "$ROLE" in
+  reasoning|coding) ;;
   *)
-    echo "Usage: $0 [--ram <3gb|4gb|6gb|8gb|12gb|16gb>] [pixel9a|motog5g]"
-    echo "Run with no arguments to auto-detect RAM and pick a tier."
+    echo "Unknown --role '$ROLE'. Valid: reasoning, coding" >&2
     exit 1
     ;;
 esac
@@ -61,30 +100,68 @@ THREADS="$CORES"
 [ "$THREADS" -gt 8 ] && THREADS=8
 [ "$THREADS" -lt 2 ] && THREADS=2
 
+# --role coding is only wired up for the tiers below where a code-tuned
+# model has actually been picked out with real license/benchmark checks
+# behind it (see the header comment). Reject it early and clearly for
+# every other tier rather than silently falling back to reasoning -- a
+# flag that's quietly ignored is worse than one that errors.
+if [ "$ROLE" = "coding" ]; then
+  case "$TIER" in
+    3gb|4gb|6gb) ;;
+    *)
+      echo "Error: --role coding isn't available yet for the $TIER tier." >&2
+      echo "Only 3gb/4gb/6gb have a vetted coding-specific model right now." >&2
+      echo "Use --role reasoning (the default), or drop --role entirely." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 case "$TIER" in
   3gb)
-    MODEL_REPO="unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
-    MODEL_FILE="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
-    MODEL_LABEL="DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M)"
-    MODEL_ALIAS="deepseek-r1-qwen-1.5b"
+    if [ "$ROLE" = "coding" ]; then
+      MODEL_REPO="unsloth/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+      MODEL_FILE="qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+      MODEL_LABEL="Qwen2.5-Coder-1.5B-Instruct (Q4_K_M)"
+      MODEL_ALIAS="qwen2.5-coder-1.5b"
+    else
+      MODEL_REPO="unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
+      MODEL_FILE="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
+      MODEL_LABEL="DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M)"
+      MODEL_ALIAS="deepseek-r1-qwen-1.5b"
+    fi
     CTX_SIZE=1536
     MAP_TOKENS=0
     MAX_FEEDBACK_CHARS=900
     ;;
   4gb)
-    MODEL_REPO="unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
-    MODEL_FILE="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
-    MODEL_LABEL="DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M)"
-    MODEL_ALIAS="deepseek-r1-qwen-1.5b"
+    if [ "$ROLE" = "coding" ]; then
+      MODEL_REPO="unsloth/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+      MODEL_FILE="qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+      MODEL_LABEL="Qwen2.5-Coder-1.5B-Instruct (Q4_K_M)"
+      MODEL_ALIAS="qwen2.5-coder-1.5b"
+    else
+      MODEL_REPO="unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
+      MODEL_FILE="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
+      MODEL_LABEL="DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M)"
+      MODEL_ALIAS="deepseek-r1-qwen-1.5b"
+    fi
     CTX_SIZE=2048
     MAP_TOKENS=0
     MAX_FEEDBACK_CHARS=1200
     ;;
   6gb)
-    MODEL_REPO="unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
-    MODEL_FILE="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
-    MODEL_LABEL="DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M)"
-    MODEL_ALIAS="deepseek-r1-qwen-1.5b"
+    if [ "$ROLE" = "coding" ]; then
+      MODEL_REPO="unsloth/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+      MODEL_FILE="qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+      MODEL_LABEL="Qwen2.5-Coder-1.5B-Instruct (Q4_K_M)"
+      MODEL_ALIAS="qwen2.5-coder-1.5b"
+    else
+      MODEL_REPO="unsloth/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
+      MODEL_FILE="DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
+      MODEL_LABEL="DeepSeek-R1-Distill-Qwen-1.5B (Q4_K_M)"
+      MODEL_ALIAS="deepseek-r1-qwen-1.5b"
+    fi
     CTX_SIZE=3072
     MAP_TOKENS=256
     MAX_FEEDBACK_CHARS=2000
@@ -133,7 +210,7 @@ PROFILE_DIR="$HOME/.offlinetweaker"
 PROFILE_FILE="$PROFILE_DIR/profile.env"
 
 echo "OfflineTweaker Android setup"
-echo "Tier: $TIER -> $MODEL_LABEL"
+echo "Tier: $TIER ($ROLE) -> $MODEL_LABEL"
 echo "Threads: $THREADS (from $CORES CPU cores)"
 echo
 
@@ -464,6 +541,7 @@ chmod +x "$HOME/run-model.sh"
 mkdir -p "$PROFILE_DIR"
 cat > "$PROFILE_FILE" << EOF
 DEVICE_TIER=$TIER
+MODEL_ROLE=$ROLE
 MODEL_ALIAS=$MODEL_ALIAS
 MODEL_LABEL="$MODEL_LABEL"
 CTX_SIZE=$CTX_SIZE
@@ -1068,6 +1146,6 @@ echo "      for a manual agentic coding CLI, or android/agent-loop.sh for the"
 echo "      autonomous write-test-fix loop (reads this saved profile"
 echo "      automatically, no flags needed)."
 echo
-echo "Model: $MODEL_LABEL (alias: $MODEL_ALIAS)"
+echo "Model: $MODEL_LABEL (alias: $MODEL_ALIAS, role: $ROLE)"
 echo "Context: $CTX_SIZE tokens | Threads: $THREADS"
 echo "Profile saved to: $PROFILE_FILE"
