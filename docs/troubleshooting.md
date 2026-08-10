@@ -133,14 +133,18 @@ picked tier can still not have enough *free* RAM right now.
 
 Fixed: `run-model.sh` now checks `MemAvailable` from `/proc/meminfo`
 against the model file's actual size before launching `llama-server`,
-and prints a warning to the terminal if it looks tight, rather than
-silently trying and getting killed with no explanation. This is a
-warning, not a hard block, since it's an estimate (it doesn't know the
-exact KV cache size for every model architecture), not a guaranteed
-prediction.
+and refuses to start if it looks like Android would kill Termux
+partway through anyway, instead of trying and letting it get killed
+with no explanation. An earlier version of this fix only printed a
+warning and launched anyway, which didn't actually stop the crash, it
+just narrated it right before it happened, so this refuses by default
+now.
 
-If you see that warning, or Termux still closes without it firing
-(a large enough safety margin can still be wrong for your specific
-model/context combination): close background apps to free RAM, or
-re-run `termux-setup.sh --ram <a smaller tier>` to switch to a model
-that fits more comfortably.
+This is still an estimate (it doesn't know the exact KV cache size for
+every model architecture), not a guaranteed prediction, so it can be
+wrong in either direction. If you think it's wrong for your case, or
+you'd rather try anyway, `~/run-model.sh --force` skips the check.
+
+If it's blocking you and you don't want to force it: close background
+apps to free RAM, or re-run `termux-setup.sh --ram <a smaller tier>`
+to switch to a model that fits more comfortably.
