@@ -61,6 +61,33 @@ Then either:
   [autonomous build loop](#autonomous-build-loop) — both use the same local
   model, no cloud API key needed.
 
+`termux-setup.sh` ends with a summary that's worth actually reading, not
+just scrolling past — it's your confirmation the auto-detect picked what
+you expected, and the exact commands above with your real values filled
+in:
+
+```
+Done. Recommended next steps:
+  1. termux-wake-lock            # stop Android from suspending inference
+  2. ~/run-model.sh              # starts the model on http://127.0.0.1:8080
+  3a. Open http://127.0.0.1:8080 in Chrome for the built-in chat UI, or
+  3b. In a second Termux session: cd your-project && ~/aider-local.sh
+      for a manual agentic coding CLI, or android/agent-loop.sh for the
+      autonomous write-test-fix loop (reads this saved profile
+      automatically, no flags needed).
+
+Model: DeepSeek-R1-Distill-Qwen-7B (Q4_K_M) (alias: deepseek-r1-qwen-7b)
+Context: 4096 tokens | Threads: 8
+Profile saved to: /data/data/com.termux/files/home/.offlinetweaker/profile.env
+```
+
+The `Model`/`Context`/`Threads` line is your RAM tier's auto-detect result
+printed back at you — glance at it to confirm it picked the tier you
+expected (force a different one with `--ram`, see the table below, if
+not). The `Profile saved to` path is that same choice written to disk —
+`android/agent-loop.sh` reads it automatically, so nothing past this
+point needs re-typing which model or tier you're on.
+
 Model picked per RAM tier:
 
 | Tier  | Typical device RAM | Model                          | Quant   | Size    |
