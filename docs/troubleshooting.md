@@ -148,3 +148,39 @@ you'd rather try anyway, `~/run-model.sh --force` skips the check.
 If it's blocking you and you don't want to force it: close background
 apps to free RAM, or re-run `termux-setup.sh --ram <a smaller tier>`
 to switch to a model that fits more comfortably.
+
+## `run-model.sh` runs, but everything freezes once you open the browser
+
+Different symptom from "Termux just closes" above, don't confuse the
+two: this one is a hang, not a crash. `llama-server` stays alive
+(check with `ps` in another Termux session, or just look for its
+output still sitting there), but requests to `http://127.0.0.1:8080`
+never come back, and the page just spins.
+
+Likely cause, based on documented Android platform behavior, not
+confirmed on a specific device: opening `http://127.0.0.1:8080` in
+Chrome means switching away from Termux, which puts it in the
+background. `termux-wake-lock` only stops the CPU from sleeping
+entirely, the same limited guarantee already noted above for the
+OOM-kill case, but this is a different mechanism than that one: it
+does nothing to stop Android's Doze mode, App Standby, or an OEM's own
+battery manager (Samsung, Xiaomi/MIUI, OnePlus, and others all ship
+their own on top of stock Android) from throttling a *backgrounded*
+app's CPU down to a crawl. `llama-server` isn't killed the way it is
+in the OOM case, it's just starved, so a request that would normally
+take a couple seconds can sit unanswered for minutes, indistinguishable
+from a true hang unless you already know to expect it.
+
+Not fixed by anything in this script, this is Android platform
+behavior on top of a process the script has no control over once it's
+launched. Two ways around it:
+
+- Keep Termux visible. Split-screen it with Chrome instead of fully
+  switching away, so Android still treats it as foreground (or
+  foreground-adjacent, depending on OEM) instead of backgrounding it.
+- Or turn off battery optimization for Termux entirely: Android
+  Settings → Apps → Termux → Battery → set to Unrestricted. Exact menu
+  wording varies by OEM/Android version.
+
+Either one keeps Termux out of the throttled state to begin with,
+rather than trying to detect or recover from it after the fact.

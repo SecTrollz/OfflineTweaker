@@ -569,6 +569,8 @@ if [ -n "\$AVAILABLE_MB" ] && [ "\$AVAILABLE_MB" -lt "\$NEEDED_MB" ] && [ -z "\$
   echo "  ~/run-model.sh --force" >&2
   exit 1
 fi
+echo "Loading $MODEL_LABEL... first launch can take a while on phone CPUs" \\
+  "with no progress output in between -- that's expected, not a hang."
 exec "$LLAMA_DIR/build/bin/llama-server" \\
   -m "$MODELS_DIR/$MODEL_FILE" \\
   -c $CTX_SIZE \\

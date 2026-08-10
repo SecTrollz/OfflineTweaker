@@ -54,6 +54,10 @@ Open `http://127.0.0.1:8080` in Chrome, or in a second Termux session run
 with `--ram 8gb` if it guesses wrong. More detail: see
 [On-Device (Android / Termux)](#on-device-android--termux) below.
 
+Switching away from Termux to open the browser can make it look frozen
+on some phones (background battery throttling, not a crash), see
+[Troubleshooting](docs/troubleshooting.md#run-modelsh-runs-but-everything-freezes-once-you-open-the-browser).
+
 ## Features
 
 - **Autonomous build loop.** Give it a task, it writes code, runs your tests, reads the failures, fixes itself, repeats until the tests pass or it gives up. Like a junior dev who doesn't complain. See [Autonomous Build Loop](#autonomous-build-loop).
