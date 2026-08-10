@@ -165,7 +165,7 @@ if you hit any.
 
 Notes:
 - `termux-setup-storage` runs automatically, the model survives Termux updates.
-- `termux-wake-lock` keeps Android from sleeping mid inference, but it doesn't stop Android from killing Termux outright if RAM runs low, that's a different mechanism. `run-model.sh` checks free memory against the model size before launching and warns if it looks tight, see [Troubleshooting](docs/troubleshooting.md) if Termux keeps closing on you.
+- `termux-wake-lock` keeps Android from sleeping mid inference, but it doesn't stop Android from killing Termux outright if RAM runs low, that's a different mechanism. `run-model.sh` checks free memory against the model size before launching and refuses to start if it looks like Android would kill Termux anyway, `~/run-model.sh --force` skips that check if you think it's wrong. See [Troubleshooting](docs/troubleshooting.md) if this keeps happening.
 - Expect `<think>` traces on the reasoning lane. Trim them client side, or just use `--role coding` above to skip them.
 - Profile saved to `~/.offlinetweaker/profile.env`, agent scripts read it automatically.
 - Interrupted downloads resume. Partial files get checksum verified before use, same as a fresh download.

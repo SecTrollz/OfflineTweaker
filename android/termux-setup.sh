@@ -527,7 +527,11 @@ echo "[5/6] Writing server launcher and saved profile..."
 # multi-GB model -- confirmed as an actual failure mode, not a
 # hypothetical one (RAM-tier auto-detect buckets on MemTotal at setup
 # time, which can be a lot higher than what's actually free later, once
-# other apps/background services are using the phone). MODEL_SIZE_MB
+# other apps/background services are using the phone). A first version
+# of this only warned and launched anyway -- useless in practice, since
+# the whole point is Termux dies with no explanation, so a warning that
+# scrolls by right before it dies doesn't fix anything the user
+# actually experiences. This refuses to launch instead. MODEL_SIZE_MB
 # baked in here from the real downloaded file, not guessed.
 MODEL_SIZE_MB=$(( $(wc -c < "$MODEL_PATH") / 1024 / 1024 ))
 cat > "$HOME/run-model.sh" << EOF
@@ -536,19 +540,34 @@ cat > "$HOME/run-model.sh" << EOF
 # Keep Termux in the foreground (or run 'termux-wake-lock' first) so
 # Android doesn't kill the process mid-inference.
 #
-# Pre-flight memory check, warns rather than blocks: this is a rough
-# estimate (actual usage also depends on KV cache size, which varies by
-# model architecture and isn't computed here), not an exact prediction,
-# so a false alarm shouldn't stop a run that would've been fine.
+# Pre-flight memory check. termux-wake-lock only stops the CPU from
+# sleeping, it does nothing to stop Android's low-memory killer from
+# closing Termux outright when the system is genuinely low on RAM.
+# Refuses to launch by default when that looks likely, instead of
+# trying anyway and leaving you to guess why Termux just vanished.
+# Pass --force to launch regardless -- this is a rough estimate (it
+# doesn't know the model's actual KV cache size), it can be wrong in
+# either direction.
+FORCE=""
+case "\${1:-}" in
+  --force) FORCE=1 ;;
+esac
 MODEL_SIZE_MB=$MODEL_SIZE_MB
 AVAILABLE_MB="\$(awk '/MemAvailable/ {print int(\$2/1024)}' /proc/meminfo)"
 NEEDED_MB=\$(( MODEL_SIZE_MB * 12 / 10 + 300 ))
-if [ -n "\$AVAILABLE_MB" ] && [ "\$AVAILABLE_MB" -lt "\$NEEDED_MB" ]; then
-  echo "Warning: only \${AVAILABLE_MB}MB free, this model probably needs" >&2
-  echo "around \${NEEDED_MB}MB. Android may kill Termux mid-run if it" >&2
-  echo "doesn't fit -- close some background apps, or re-run" >&2
-  echo "termux-setup.sh with a smaller --ram tier if this keeps happening." >&2
+if [ -n "\$AVAILABLE_MB" ] && [ "\$AVAILABLE_MB" -lt "\$NEEDED_MB" ] && [ -z "\$FORCE" ]; then
+  echo "Only \${AVAILABLE_MB}MB free, this model probably needs around" >&2
+  echo "\${NEEDED_MB}MB. Not starting it -- Android would likely kill" >&2
+  echo "Termux partway through with no explanation, which is worse than" >&2
+  echo "not starting at all." >&2
   echo >&2
+  echo "Close some background apps and try again, or re-run" >&2
+  echo "termux-setup.sh with a smaller --ram tier to switch to a model" >&2
+  echo "that fits more comfortably." >&2
+  echo >&2
+  echo "Think this estimate is wrong for your case? Run again with:" >&2
+  echo "  ~/run-model.sh --force" >&2
+  exit 1
 fi
 exec "$LLAMA_DIR/build/bin/llama-server" \\
   -m "$MODELS_DIR/$MODEL_FILE" \\
