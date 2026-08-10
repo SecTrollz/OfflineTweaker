@@ -1,4 +1,6 @@
-# OfflineTweaker
+<p align="center">
+  <img src="assets/logo.jpg" alt="OfflineTweaker" width="320">
+</p>
 
 Local AI coding agent that runs on your laptop, phone, or cloud VM — fully
 offline by default, with optional cloud boosts when you need them.
