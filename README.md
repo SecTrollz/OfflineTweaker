@@ -5,10 +5,10 @@
 You're not paying for this. I'm not paying for this. Nobody's paying for
 this. That's the whole point.
 
-This is an offline AI coding agent that runs on your laptop, your phone,
-or a random VM you found in a datacenter. No API keys, no monthly fees,
-nobody's credit card on file. Download it, run it, fix your broken code
-anywhere with no signal.
+OfflineTweaker is an offline AI coding agent that runs on your laptop,
+your phone, or a random VM you found in a datacenter. No API keys, no
+monthly fees, nobody's credit card on file. Download it, run it, fix
+your broken code anywhere with no signal.
 
 ## What This Actually Is
 
@@ -289,6 +289,67 @@ password (`age-keygen` already sets it `chmod 600`). This uses asymmetric
 encryption on purpose, not a passphrase. A passphrase means re-typing it
 on every file write, which doesn't work for an unattended loop, and
 age's own passphrase mode refuses to run non-interactively anyway.
+
+## FAQ
+
+**What is OfflineTweaker?**
+An open source offline AI coding agent. It runs local language models on
+your own hardware, laptop, phone, or a rented box, and drives them
+through Aider to write, test, and fix code.
+
+**Does it work without an internet connection?**
+Yes, once it's set up. You need internet the first time to clone the
+repo, build llama.cpp, and pull a model. After that, `run-model.sh` and
+the agent loops don't touch the network unless you go [Cloud](#cloud)
+on purpose.
+
+**Can it run on Android?**
+Yes. That's the whole [On-Device (Android / Termux)](#on-device-android--termux)
+section. No root needed, no Play Store Termux either, use the F-Droid build.
+
+**Does it support Termux?**
+Yes, Termux is the only way the Android path works. Native llama.cpp,
+built on device, no server, no Docker.
+
+**Which local models can it run?**
+DeepSeek-R1 distills and Qwen2.5-Coder on Android, picked automatically
+by RAM tier (see the [model table](#on-device-android--termux)).
+Qwen2.5-Coder on desktop through Ollama. Any GGUF llama.cpp supports or
+any model Ollama can pull will technically run, these are just the ones
+auto-configured out of the box.
+
+**Can it use llama.cpp?**
+Yes. That's exactly what `termux-setup.sh` builds natively on your
+phone, no prebuilt binary, no root.
+
+**Can it use Ollama?**
+Yes, that's the desktop path. `setup.sh` stands up Ollama in Docker
+alongside Aider, Continue.dev, and Jupyter.
+
+**Can it work with Aider?**
+Yes, Aider isn't optional, it's what actually drives the coding. The
+[Autonomous Build Loop](#autonomous-build-loop) is a wrapper around it.
+
+**Can it run on limited RAM?**
+Yes, that's the point of the Android RAM tiers. The smallest tier
+targets ~3GB devices with a 1.5B model.
+
+**Does it require an API key?**
+No, not for local use on desktop or Android. You only need one if you
+opt into a third party API under [Cloud](#cloud), and it's never
+required.
+
+**Is OfflineTweaker open source?**
+Yes, Apache 2.0. See [License](#license) below.
+
+**Can I use it for software development completely locally, no cloud at all?**
+Yes. That's the default. Cloud is opt-in, not required for any of this
+to work.
+
+## More Docs
+
+- [Troubleshooting](docs/troubleshooting.md), real errors this thing has actually hit on real devices and how they got fixed.
+- [Architecture](docs/architecture.md), how the pieces actually fit together.
 
 ## License
 
