@@ -132,7 +132,7 @@ Done. Recommended next steps:
       autonomous write-test-fix loop (reads this saved profile
       automatically, no flags needed).
 
-Model: DeepSeek-R1-Distill-Qwen-7B (Q4_K_M) (alias: deepseek-r1-qwen-7b)
+Model: DeepSeek-R1-Distill-Qwen-7B (Q4_K_M) (alias: deepseek-r1-qwen-7b, role: reasoning)
 Context: 4096 tokens | Threads: 8
 Profile saved to: /data/data/com.termux/files/home/.offlinetweaker/profile.env
 ```
@@ -160,6 +160,27 @@ Same model at the 3/4/6GB tiers on purpose — DeepSeek only ships a 1.5B or a
 into a bigger context window instead. Force a specific tier with
 `./termux-setup.sh --ram 8gb` if auto-detection picks wrong, or use the
 legacy aliases `./setup.sh pixel9a` / `motog5g`.
+
+**Coding lane (`--role coding`, experimental).** The default model above
+is a DeepSeek-R1 *reasoning* distill — good at diagnosing why something's
+broken, at the cost of `<think>` traces that eat into the small context
+budget these tiers have to work with. `--role coding` swaps in a
+code-tuned model instead, no reasoning overhead:
+
+| Tier | Model | Quant | License |
+|------|-------|-------|---------|
+| 3gb / 4gb / 6gb | Qwen2.5-Coder-1.5B-Instruct | Q4_K_M | Apache 2.0 |
+
+```bash
+./termux-setup.sh --ram 6gb --role coding
+```
+
+Only available on the 3gb/4gb/6gb tiers right now — `--role coding` on
+8gb/12gb/16gb errors out cleanly rather than silently falling back, since
+there isn't a vetted code-tuned candidate at those sizes yet. This lane
+is newer than the reasoning one and hasn't had the same real-device
+mileage — if it breaks, that's useful to know, same as any other `--ram`
+tier bug reported here.
 
 Notes:
 - Run `termux-setup-storage` (the setup script does this for you) so the
