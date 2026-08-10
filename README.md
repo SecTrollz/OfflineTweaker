@@ -134,11 +134,13 @@ Notes:
 
 ## Autonomous Build Loop
 
-This piece makes it a *builder* rather than a chat window, the
-same idea behind Replit Agent / Emergent: hand it a task, it writes code,
-**runs your tests, reads the failures, and fixes it itself** — repeating
-until the tests pass or it runs out of attempts. Fully offline, on top of
-whichever local model you're already running.
+A thin wrapper around [Aider](https://aider.chat)'s own edit loop that
+turns it from something you babysit into something you can walk away
+from: give it a task, it writes code with Aider, **runs your
+`--test-cmd`, feeds Aider the failure output, and repeats** until the
+tests pass or it runs out of attempts — the same idea behind Replit
+Agent / Emergent, just built on Aider instead of from scratch. Fully
+offline, on top of whichever local model you're already running.
 
 ```bash
 # Desktop, against the Ollama server from setup.sh:

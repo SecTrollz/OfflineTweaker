@@ -37,8 +37,12 @@ fi
 # floating tags mean an upstream push can silently break or change behavior
 # of every running stack with no changelog to consult. Each is still
 # overridable per the ${VAR:-default} syntax below (e.g. OLLAMA_DOCKER_TAG=
-# in .env) if you want to track upstream more closely or pin differently;
-# bump the defaults here periodically.
+# in .env) if you want to track upstream more closely (testing an unreleased
+# fix, chasing a new feature) or pin to something older; just know that
+# overriding to `latest` specifically reintroduces the exact silent-break
+# risk pinning exists to avoid -- fine for a throwaway/dev box, not
+# recommended for a stack you depend on. Bump the defaults here
+# periodically instead of leaving them on `latest` long-term.
 if [ ! -f docker-compose.yml ]; then
 cat > docker-compose.yml << 'EOF'
 services:
