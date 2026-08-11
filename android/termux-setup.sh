@@ -537,8 +537,20 @@ MODEL_SIZE_MB=$(( $(wc -c < "$MODEL_PATH") / 1024 / 1024 ))
 cat > "$HOME/run-model.sh" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 # Launches $MODEL_LABEL as a local OpenAI-compatible server.
-# Keep Termux in the foreground (or run 'termux-wake-lock' first) so
-# Android doesn't kill the process mid-inference.
+#
+# Acquires a wake-lock automatically -- previously this was a separate
+# manual step ('termux-wake-lock' before running this script), and a
+# forgotten wake-lock is one more way this can end up looking dead for
+# no visible reason. This only stops the CPU from sleeping, it does NOT
+# stop Android's low-memory killer -- see the pre-flight memory check
+# right below for that. termux-wake-lock ships as part of Termux's own
+# base install (termux-tools), not the separate Termux:API add-on, so
+# this should be present on any stock Termux setup; best-effort anyway
+# (command -v guard) in case a minimal install strips it, in which case
+# this silently falls back to the old behavior of needing the app kept
+# in the foreground.
+command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock
+trap 'command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock' EXIT
 #
 # Pre-flight memory check. termux-wake-lock only stops the CPU from
 # sleeping, it does nothing to stop Android's low-memory killer from
@@ -571,7 +583,12 @@ if [ -n "\$AVAILABLE_MB" ] && [ "\$AVAILABLE_MB" -lt "\$NEEDED_MB" ] && [ -z "\$
 fi
 echo "Loading $MODEL_LABEL... first launch can take a while on phone CPUs" \\
   "with no progress output in between -- that's expected, not a hang."
-exec "$LLAMA_DIR/build/bin/llama-server" \\
+# Not exec'd (unlike the check above exiting early, which has nothing
+# left to clean up): exec would replace this shell outright, and the
+# EXIT trap above only fires for the process it's set on -- swapping in
+# llama-server as that process means the trap, and the wake-unlock it
+# runs, would never fire when the server exits or gets Ctrl-C'd.
+"$LLAMA_DIR/build/bin/llama-server" \\
   -m "$MODELS_DIR/$MODEL_FILE" \\
   -c $CTX_SIZE \\
   -t $THREADS \\
@@ -1183,10 +1200,10 @@ chmod +x "$HOME/aider-local.sh"
 
 echo
 echo "Done. Recommended next steps:"
-echo "  1. termux-wake-lock            # stop Android from suspending inference"
-echo "  2. ~/run-model.sh              # starts the model on http://127.0.0.1:8080"
-echo "  3a. Open http://127.0.0.1:8080 in Chrome for the built-in chat UI, or"
-echo "  3b. In a second Termux session: cd your-project && ~/aider-local.sh"
+echo "  1. ~/run-model.sh              # starts the model on http://127.0.0.1:8080"
+echo "     (acquires its own wake-lock, no separate termux-wake-lock step needed)"
+echo "  2a. Open http://127.0.0.1:8080 in Chrome for the built-in chat UI, or"
+echo "  2b. In a second Termux session: cd your-project && ~/aider-local.sh"
 echo "      for a manual agentic coding CLI, or android/agent-loop.sh for the"
 echo "      autonomous write-test-fix loop (reads this saved profile"
 echo "      automatically, no flags needed)."

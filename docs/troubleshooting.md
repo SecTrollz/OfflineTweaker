@@ -121,8 +121,9 @@ manual `--ram` override, `run-model.sh` would run and then Termux would
 close on its own, no crash log, no error, the rest of the phone kept
 working fine.
 
-Root cause: `termux-wake-lock` (which the quickstart already tells you
-to run first) only stops the CPU from sleeping. It does nothing to stop
+Root cause: `termux-wake-lock` (which `run-model.sh` now acquires
+automatically on launch, previously a separate manual step) only stops
+the CPU from sleeping. It does nothing to stop
 Android's low-memory killer from closing Termux outright if the system
 is genuinely low on RAM when `llama-server` tries to load a multi-GB
 model. The RAM tier gets picked once, at `termux-setup.sh` time, based
@@ -160,9 +161,10 @@ never come back, and the page just spins.
 Likely cause, based on documented Android platform behavior, not
 confirmed on a specific device: opening `http://127.0.0.1:8080` in
 Chrome means switching away from Termux, which puts it in the
-background. `termux-wake-lock` only stops the CPU from sleeping
-entirely, the same limited guarantee already noted above for the
-OOM-kill case, but this is a different mechanism than that one: it
+background. The wake-lock `run-model.sh` acquires automatically only
+stops the CPU from sleeping entirely, the same limited guarantee
+already noted above for the OOM-kill case, but this is a different
+mechanism than that one: it
 does nothing to stop Android's Doze mode, App Standby, or an OEM's own
 battery manager (Samsung, Xiaomi/MIUI, OnePlus, and others all ship
 their own on top of stock Android) from throttling a *backgrounded*
