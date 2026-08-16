@@ -88,12 +88,17 @@ jobs:
             --model qwen2.5-coder:1.5b \
             --api-base http://127.0.0.1:11434/v1 \
             --test-cmd "python3 -m pytest -q" \
-            --max-iters 3
+            --max-iters 5
 
       - name: Confirm the fix actually landed (belt and suspenders on the loop's own exit code)
         run: |
           cd /tmp/toy-project
           python3 -m pytest -q
+
+      - name: Show agent logs on failure
+        if: failure()
+        run: |
+          find /tmp/toy-project/.offlinetweaker/agent-logs -type f -exec sh -c 'echo "--- {} ---"; cat "{}"' \;
 
   ssh-tunnel:
     runs-on: ubuntu-latest
@@ -151,7 +156,13 @@ jobs:
           git -c user.email=ci@example.com -c user.name=ci commit -q -m "init with a deliberate bug"
 
       - name: Run the real build loop through the real SSH tunnel, must not hang
-        timeout-minutes: 3
+        # --max-iters 5 matches build-loop.sh's own default -- a tighter
+        # budget here would test artificially-starved behavior instead of
+        # what a real user actually gets. The timeout is a generous multiple
+        # of that (a single 1.5B iteration has taken up to ~75s observed
+        # here), there to catch a genuine hang (bug #4's failure mode), not
+        # to double as an iteration budget.
+        timeout-minutes: 8
         run: |
           "$GITHUB_WORKSPACE/cloud/agent-loop.sh" \
             --host "$USER@127.0.0.1" --remote-port 11435 --local-port 12000 \
@@ -159,12 +170,17 @@ jobs:
             --dir /tmp/toy-project-cloud \
             --task "The test in tests/test_calc.py is failing. Fix the bug in calc.py." \
             --test-cmd "python3 -m pytest -q" \
-            --max-iters 2
+            --max-iters 5
 
       - name: Confirm the fix actually landed
         run: |
           cd /tmp/toy-project-cloud
           python3 -m pytest -q
+
+      - name: Show agent logs on failure
+        if: failure()
+        run: |
+          find /tmp/toy-project-cloud/.offlinetweaker/agent-logs -type f -exec sh -c 'echo "--- {} ---"; cat "{}"' \;
 
       - name: Confirm the tunnel did not leak
         run: |
