@@ -199,7 +199,12 @@ cd android
 ```
 
 How it works:
-- A short built-in system preamble keeps responses terse. Override it with `OFFLINETWEAKER_SYSTEM_PROMPT`.
+- No system preamble is sent by default -- a "be terse, don't restate
+  unchanged code" preamble used to be baked in here, but verified testing
+  against a real local model (qwen2.5-coder:1.5b) showed it reliably broke
+  Aider's edit format, which requires restating the full file. Set
+  `OFFLINETWEAKER_SYSTEM_PROMPT` if you want a custom one anyway, but verify
+  it against your actual model first.
 - Aider edits the code in `--dir`.
 - `--test-cmd` runs.
 - On failure, the last `--max-feedback-chars` of output gets fed back.

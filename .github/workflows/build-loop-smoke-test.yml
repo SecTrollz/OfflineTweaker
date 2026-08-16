@@ -1,0 +1,191 @@
+name: Build Loop Smoke Test
+
+# ShellCheck never catches this class of bug: every failure this workflow
+# guards against was only visible by actually running the loop against a
+# real model. Concretely, this exact recipe (real Ollama + a toy project
+# with one deliberate bug + a real failing pytest) caught:
+#   - a system-preamble instruction ("avoid restating unchanged code") that
+#     silently broke Aider's edit format on a small model -- 0/3 iterations
+#     converged with it, 1/1 converged without it, same model/bug/task.
+#   - an SSH tunnel local-port collision with an unrelated already-running
+#     service that made the readiness check false-positive and silently
+#     talk to the wrong backend.
+#   - ssh failing closed on a first-time host-key check with no TTY to
+#     prompt on.
+#   - a leaked, orphaned SSH tunnel + indefinite hang on anything consuming
+#     this script's output, caused by `exec` skipping the cleanup trap and
+#     the backgrounded ssh process inheriting stdout/stderr.
+# None of those are syntax errors. All of them are exactly the kind of
+# thing "looks fine on review" misses and a real run catches immediately.
+#
+# Scoped to the call sites that can affect this behavior, since it pulls a
+# real (small) model -- not something every unrelated README/docs push
+# needs to pay for. Runnable on demand via workflow_dispatch too.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agent/build-loop.sh'
+      - 'android/agent-loop.sh'
+      - 'cloud/agent-loop.sh'
+      - '.github/workflows/build-loop-smoke-test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'agent/build-loop.sh'
+      - 'android/agent-loop.sh'
+      - 'cloud/agent-loop.sh'
+      - '.github/workflows/build-loop-smoke-test.yml'
+  workflow_dispatch:
+
+jobs:
+  local-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ollama and pull a small real model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for _ in $(seq 1 30); do
+            curl -s http://127.0.0.1:11434/ >/dev/null && break
+            sleep 1
+          done
+          ollama pull qwen2.5-coder:1.5b
+
+      - name: Install Aider + pytest
+        run: |
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --quiet pytest aider-chat
+          echo "$PWD/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build a toy project with a real, deliberate bug
+        run: |
+          mkdir -p /tmp/toy-project/tests
+          cd /tmp/toy-project
+          git init -q
+          cat > calc.py << 'EOF'
+          def add(a, b):
+              """Add two numbers."""
+              return a - b  # bug: should be a + b
+          EOF
+          cat > tests/test_calc.py << 'EOF'
+          from calc import add
+
+          def test_add():
+              assert add(2, 3) == 5
+          EOF
+          git add -A
+          git -c user.email=ci@example.com -c user.name=ci commit -q -m "init with a deliberate bug"
+
+      - name: Run the real build loop against the real model
+        run: |
+          "$GITHUB_WORKSPACE/agent/build-loop.sh" \
+            --dir /tmp/toy-project \
+            --task "The test in tests/test_calc.py is failing. Fix the bug in calc.py." \
+            --model qwen2.5-coder:1.5b \
+            --api-base http://127.0.0.1:11434/v1 \
+            --test-cmd "python3 -m pytest -q" \
+            --max-iters 5
+
+      - name: Confirm the fix actually landed (belt and suspenders on the loop's own exit code)
+        run: |
+          cd /tmp/toy-project
+          python3 -m pytest -q
+
+      - name: Show agent logs on failure
+        if: failure()
+        run: |
+          find /tmp/toy-project/.offlinetweaker/agent-logs -type f -exec sh -c 'echo "--- {} ---"; cat "{}"' \;
+
+  ssh-tunnel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ollama and pull a small real model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          OLLAMA_HOST=127.0.0.1:11435 nohup ollama serve > /tmp/ollama.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -s http://127.0.0.1:11435/ >/dev/null && break
+            sleep 1
+          done
+          OLLAMA_HOST=127.0.0.1:11435 ollama pull qwen2.5-coder:1.5b
+
+      - name: Set up a local sshd as the "remote" host
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openssh-server
+          sudo mkdir -p /run/sshd
+          sudo /usr/sbin/sshd -D &
+          ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -q
+          mkdir -p ~/.ssh
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          # Deliberately do NOT pre-accept the host key -- the whole point
+          # of this job is to exercise a genuine first-time connection,
+          # same as the real bug this caught.
+
+      - name: Install Aider + pytest
+        run: |
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --quiet pytest aider-chat
+          echo "$PWD/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build a toy project with a real, deliberate bug
+        run: |
+          mkdir -p /tmp/toy-project-cloud/tests
+          cd /tmp/toy-project-cloud
+          git init -q
+          cat > calc.py << 'EOF'
+          def add(a, b):
+              """Add two numbers."""
+              return a - b  # bug: should be a + b
+          EOF
+          cat > tests/test_calc.py << 'EOF'
+          from calc import add
+
+          def test_add():
+              assert add(2, 3) == 5
+          EOF
+          git add -A
+          git -c user.email=ci@example.com -c user.name=ci commit -q -m "init with a deliberate bug"
+
+      - name: Run the real build loop through the real SSH tunnel, must not hang
+        # --max-iters 5 matches build-loop.sh's own default -- a tighter
+        # budget here would test artificially-starved behavior instead of
+        # what a real user actually gets. The timeout is a generous multiple
+        # of that (a single 1.5B iteration has taken up to ~75s observed
+        # here), there to catch a genuine hang (bug #4's failure mode), not
+        # to double as an iteration budget.
+        timeout-minutes: 8
+        run: |
+          "$GITHUB_WORKSPACE/cloud/agent-loop.sh" \
+            --host "$USER@127.0.0.1" --remote-port 11435 --local-port 12000 \
+            --model qwen2.5-coder:1.5b \
+            --dir /tmp/toy-project-cloud \
+            --task "The test in tests/test_calc.py is failing. Fix the bug in calc.py." \
+            --test-cmd "python3 -m pytest -q" \
+            --max-iters 5
+
+      - name: Confirm the fix actually landed
+        run: |
+          cd /tmp/toy-project-cloud
+          python3 -m pytest -q
+
+      - name: Show agent logs on failure
+        if: failure()
+        run: |
+          find /tmp/toy-project-cloud/.offlinetweaker/agent-logs -type f -exec sh -c 'echo "--- {} ---"; cat "{}"' \;
+
+      - name: Confirm the tunnel did not leak
+        run: |
+          if pgrep -f "ssh .*-L 12000:localhost:11435" >/dev/null; then
+            echo "SSH tunnel process is still running after the script exited -- leaked." >&2
+            exit 1
+          fi
+          echo "No leaked tunnel process."

@@ -34,13 +34,19 @@
 #     --api-base http://127.0.0.1:8080/v1 --test-cmd "python -m pytest -q" \
 #     --map-tokens 512 --max-feedback-chars 3000
 #
-# Every run gets a short built-in system preamble (override via the
-# OFFLINETWEAKER_SYSTEM_PROMPT env var) that tells the model to stay terse —
-# this matters most on small local models with a tight context window.
-# --max-feedback-chars and --map-tokens are the two real context-budget
-# levers: how much failing-test output gets fed back on retry, and how many
-# tokens Aider spends on its repo map. Tune both down for small-context
-# models; leave them unset for a normal desktop-sized context window.
+# No system preamble is sent by default. An earlier version of this script
+# always prepended "be terse, avoid restating unchanged code" -- verified
+# against a real local model (qwen2.5-coder:1.5b via Ollama) on a real
+# failing test, that instruction reliably broke Aider's "whole" edit format,
+# which *requires* restating the full file. Same model, same bug, same task:
+# 0/3 iterations converged with the preamble, 1/1 converged without it. If
+# you want a custom preamble anyway, set OFFLINETWEAKER_SYSTEM_PROMPT -- but
+# verify it against your actual model before relying on it, the same way
+# this one turned out to be broken. --max-feedback-chars and --map-tokens
+# are the two real context-budget levers: how much failing-test output gets
+# fed back on retry, and how many tokens Aider spends on its repo map. Tune
+# both down for small-context models; leave them unset for a normal
+# desktop-sized context window.
 #
 # For a hosted-API key, prefer exporting OPENAI_API_KEY before running this
 # rather than --api-key -- a key passed on the command line ends up visible
@@ -79,7 +85,7 @@ MODEL=""
 MAX_FEEDBACK_CHARS=4000
 MAP_TOKENS=""
 ENCRYPT_LOGS_TO=""
-SYSTEM_PREAMBLE="${OFFLINETWEAKER_SYSTEM_PROMPT:-You are a coding agent running on constrained local hardware with a small context window. Be terse: make the minimal correct change, avoid restating unchanged code, keep any reasoning brief, and address only the current task or test failure directly.}"
+SYSTEM_PREAMBLE="${OFFLINETWEAKER_SYSTEM_PROMPT:-}"
 
 usage() {
   echo "Usage: $0 --dir <project-dir> --task \"<task>\" --model <model> [--api-base <url>] [--api-key <key>] [--test-cmd \"<cmd>\"] [--max-iters N] [--max-feedback-chars N] [--map-tokens N] [--encrypt-logs <age-recipient-or-recipients-file>]"
@@ -198,9 +204,14 @@ for ((i = 1; i <= MAX_ITERS; i++)); do
     aider_chat_history="$LOG_ROOT/iteration-$i-aider-chat-history.md"
     aider_args+=(--chat-history-file "$aider_chat_history")
   fi
-  aider_args+=(--message "$SYSTEM_PREAMBLE
+  if [ -n "$SYSTEM_PREAMBLE" ]; then
+    message="$SYSTEM_PREAMBLE
 
-$current_task" --auto-commits)
+$current_task"
+  else
+    message="$current_task"
+  fi
+  aider_args+=(--message "$message" --auto-commits)
 
   aider "${aider_args[@]}" >> "$iter_log" 2>&1
 
