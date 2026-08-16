@@ -53,6 +53,9 @@ CUSTOM_API_BASE=""
 API_KEY="${OPENAI_API_KEY:-}"
 API_KEY_FROM_ARG=0
 PASSTHROUGH_ARGS=()
+# Set only when a tunnel is actually opened -- see the exec-vs-not branch
+# at the bottom for why this matters.
+SSH_PID=""
 
 usage() {
   echo "Usage:"
@@ -104,13 +107,43 @@ if [ -n "$HOST" ]; then
       echo "ssh not found on PATH. Install openssh (e.g. pkg/apt/brew install openssh)." >&2
       exit 1
     fi
+    # Verified with a real collision: if something is already listening on
+    # LOCAL_PORT (e.g. a desktop docker-compose Ollama on the default
+    # 11434), the readiness check below can't tell that apart from the
+    # tunnel actually coming up -- "something answered" looks identical
+    # either way, and every request then silently goes to the wrong
+    # backend instead of the remote host. Refuse up front instead.
+    if curl -s -o /dev/null "http://127.0.0.1:${LOCAL_PORT}"; then
+      echo "Something is already listening on 127.0.0.1:${LOCAL_PORT} -- refusing to open a tunnel there, since it would be impossible to tell your tunnel apart from whatever's already running. Pick a free port with --local-port." >&2
+      exit 1
+    fi
+
     echo "Opening SSH tunnel: 127.0.0.1:$LOCAL_PORT -> $HOST:$REMOTE_PORT ..."
-    ssh -N -L "${LOCAL_PORT}:localhost:${REMOTE_PORT}" "$HOST" &
+    # Verified against a real first-time connection: plain `ssh -N` in the
+    # background has no TTY to prompt "accept this host key?" on, so a host
+    # not already in known_hosts fails closed with "Host key verification
+    # failed" instead of connecting. accept-new is the safe middle ground --
+    # it trusts a *new* host automatically (fine for a VM you just rented)
+    # but still hard-fails if a *known* host's key ever changes, unlike
+    # disabling checking outright.
+    # Verified with a real run: without redirecting ssh's output, the
+    # backgrounded process inherits this script's stdout/stderr and keeps
+    # holding them open for as long as the tunnel lives -- so anything
+    # consuming this script's output (a pipe, `> log.txt`, a CI capture)
+    # never sees EOF and hangs, even after build-loop.sh below has already
+    # finished. -N has nothing useful to say on stdout anyway; send it to a
+    # small log instead of /dev/null so a connection drop is still visible.
+    SSH_LOG="$(mktemp -t offlinetweaker-tunnel.XXXXXX)"
+    ssh -o StrictHostKeyChecking=accept-new -N -L "${LOCAL_PORT}:localhost:${REMOTE_PORT}" "$HOST" >"$SSH_LOG" 2>&1 &
     SSH_PID=$!
     trap 'echo "Closing SSH tunnel..."; kill "$SSH_PID" 2>/dev/null' EXIT
 
     ready=0
     for _ in $(seq 1 10); do
+      if ! kill -0 "$SSH_PID" 2>/dev/null; then
+        echo "ssh exited before the tunnel came up -- check the host/credentials." >&2
+        break
+      fi
       if curl -s -o /dev/null "http://127.0.0.1:${LOCAL_PORT}"; then
         ready=1
         break
@@ -118,11 +151,12 @@ if [ -n "$HOST" ]; then
       sleep 1
     done
     if [ "$ready" -eq 0 ]; then
-      echo "Tunnel did not come up after 10s -- check that $HOST is reachable and sshd is running." >&2
+      echo "Tunnel did not come up after 10s -- check that $HOST is reachable and sshd is running. ssh output:" >&2
+      cat "$SSH_LOG" >&2
       exit 1
     fi
     API_BASE="http://127.0.0.1:${LOCAL_PORT}/v1"
-    echo "Tunnel is up. Using $API_BASE"
+    echo "Tunnel is up. Using $API_BASE (ssh output, if any, is logged to $SSH_LOG)"
   fi
   API_KEY="${API_KEY:-sk-local-no-key-required}"
 
@@ -163,4 +197,16 @@ fi
 # Hand off via env var, not argv -- build-loop.sh's own process listing
 # would otherwise show the key too.
 export OPENAI_API_KEY="$API_KEY"
-exec "$BUILD_LOOP" --api-base "$API_BASE" "${PASSTHROUGH_ARGS[@]}"
+
+if [ -n "$SSH_PID" ]; then
+  # Verified with a real run: `exec` replaces this process image entirely,
+  # which means the EXIT trap above that kills the SSH tunnel never fires --
+  # the tunnel leaks and keeps running forever. Only skip exec (and pay one
+  # extra process) when there's actually a tunnel that needs the trap to run
+  # on the way out; the no-tunnel and hosted-API paths have nothing to clean
+  # up, so exec is fine there.
+  "$BUILD_LOOP" --api-base "$API_BASE" "${PASSTHROUGH_ARGS[@]}"
+  exit $?
+else
+  exec "$BUILD_LOOP" --api-base "$API_BASE" "${PASSTHROUGH_ARGS[@]}"
+fi
